@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import type { Dispatch, KeyboardEvent, SetStateAction } from "react";
 import ArrowForwardRoundedIcon from "@mui/icons-material/ArrowForwardRounded";
 import AutoAwesomeRoundedIcon from "@mui/icons-material/AutoAwesomeRounded";
@@ -25,6 +25,7 @@ import SingleBatteryConfiguration from "./SingleBatteryConfiguration";
 import SingleOptimizationSetup from "./SingleOptimizationSetup";
 import type {
   SingleBatteryConfigurationSnapshot,
+  ComparisonAHPWorkspaceState,
   SingleOptimizationRunWorkspaceState,
   SingleOptimizationSetupSnapshot,
   WorkspaceDatasetSummary,
@@ -32,6 +33,7 @@ import type {
 } from "../types/workspace";
 
 const SingleOptimizationRun = lazy(() => import("./SingleOptimizationRun"));
+const ComparisonAHPConfiguration = lazy(() => import("./ComparisonAHPConfiguration"));
 
 type OptimizationMode = "single" | "comparison";
 
@@ -402,6 +404,16 @@ export default function OptimizationPage({
   onReviewDispatchStrategy,
   runState,
   setRunState,
+  selectedMode: initialMode,
+  selectedBatteryId: initialBatteryId,
+  batteryConfiguration: initialBatteryConfiguration,
+  setupConfiguration: initialSetupConfiguration,
+  activeStep: initialActiveStep,
+  operationalProfileDate,
+  onOperationalProfileDateChange,
+  comparisonAhp: initialComparisonAhp,
+  onOpenComparisonMode,
+  onStateChange,
 }: {
   dataset: WorkspaceDatasetSummary | null;
   dispatchStrategy: WorkspaceDispatchStrategy;
@@ -409,26 +421,70 @@ export default function OptimizationPage({
   onReviewDispatchStrategy: () => void;
   runState: SingleOptimizationRunWorkspaceState;
   setRunState: Dispatch<SetStateAction<SingleOptimizationRunWorkspaceState>>;
+  selectedMode: "single" | "comparison" | null;
+  selectedBatteryId: string | null;
+  batteryConfiguration: SingleBatteryConfigurationSnapshot | null;
+  setupConfiguration: SingleOptimizationSetupSnapshot | null;
+  activeStep: string | null;
+  operationalProfileDate: string | null;
+  onOperationalProfileDateChange: (date: string | null) => void;
+  comparisonAhp: ComparisonAHPWorkspaceState | null;
+  onOpenComparisonMode: () => void;
+  onStateChange: (state: {
+    selectedMode: "single" | "comparison" | null;
+    selectedBatteryId: string | null;
+    batteryConfiguration: SingleBatteryConfigurationSnapshot | null;
+    setupConfiguration: SingleOptimizationSetupSnapshot | null;
+    activeStep: string | null;
+    comparisonAhp: ComparisonAHPWorkspaceState | null;
+  }) => void;
 }) {
-  const [selectedMode, setSelectedMode] = useState<OptimizationMode | null>(null);
-  const [selectedBattery, setSelectedBattery] = useState<string | null>(null);
+  const [selectedMode, setSelectedMode] = useState<OptimizationMode | null>(
+    initialMode === "single" || initialMode === "comparison" ? initialMode : null,
+  );
+  const [selectedBattery, setSelectedBattery] = useState<string | null>(initialBatteryId);
   const [isReady, setIsReady] = useState(false);
   const [activeStep, setActiveStep] = useState<
-    "mode-selection" | "single-configuration" | "single-setup" | "single-run"
-  >("mode-selection");
+    "mode-selection" | "single-configuration" | "single-setup" | "single-run" | "comparison-ahp"
+  >(
+    initialActiveStep === "single-configuration" || initialActiveStep === "single-setup" || initialActiveStep === "single-run" || initialActiveStep === "comparison-ahp"
+      ? initialActiveStep
+      : "mode-selection",
+  );
   const [batteryConfiguration, setBatteryConfiguration] =
-    useState<SingleBatteryConfigurationSnapshot | null>(null);
+    useState<SingleBatteryConfigurationSnapshot | null>(initialBatteryConfiguration);
   const [setupConfiguration, setSetupConfiguration] =
-    useState<SingleOptimizationSetupSnapshot | null>(null);
+    useState<SingleOptimizationSetupSnapshot | null>(initialSetupConfiguration);
+  const [comparisonAhp, setComparisonAhp] =
+    useState<ComparisonAHPWorkspaceState | null>(initialComparisonAhp);
+
+  useEffect(() => {
+    if (initialActiveStep === "comparison-ahp" && initialMode === "comparison") {
+      setSelectedMode("comparison");
+      setActiveStep("comparison-ahp");
+    }
+  }, [initialActiveStep, initialMode]);
 
   const canContinue =
     selectedMode === "comparison" || (selectedMode === "single" && selectedBattery !== null);
   const selectedBatteryName = BATTERIES.find((battery) => battery.id === selectedBattery)?.name;
 
+  const persistState = (nextSelectedMode: OptimizationMode | null, nextSelectedBattery: string | null, nextBatteryConfiguration: SingleBatteryConfigurationSnapshot | null, nextSetupConfiguration: SingleOptimizationSetupSnapshot | null, nextActiveStep: "mode-selection" | "single-configuration" | "single-setup" | "single-run" | "comparison-ahp", nextComparisonAhp: ComparisonAHPWorkspaceState | null = comparisonAhp) => {
+    onStateChange({
+      selectedMode: nextSelectedMode,
+      selectedBatteryId: nextSelectedBattery,
+      batteryConfiguration: nextBatteryConfiguration,
+      setupConfiguration: nextSetupConfiguration,
+      activeStep: nextActiveStep,
+      comparisonAhp: nextComparisonAhp,
+    });
+  };
+
   function chooseMode(mode: OptimizationMode) {
     setSelectedMode(mode);
     setIsReady(false);
     setActiveStep("mode-selection");
+    persistState(mode, selectedBattery, batteryConfiguration, setupConfiguration, "mode-selection");
   }
 
   function chooseBattery(batteryId: string) {
@@ -437,14 +493,46 @@ export default function OptimizationPage({
     if (batteryId !== selectedBattery) {
       setBatteryConfiguration(null);
     }
+    persistState(selectedMode, batteryId, batteryConfiguration, setupConfiguration, activeStep);
   }
 
   function continueFromModeSelection() {
     if (selectedMode === "single" && selectedBatteryName) {
       setActiveStep("single-configuration");
+      persistState(selectedMode, selectedBattery, batteryConfiguration, setupConfiguration, "single-configuration");
+      return;
+    }
+    if (selectedMode === "comparison") {
+      setActiveStep("mode-selection");
+      persistState(selectedMode, selectedBattery, batteryConfiguration, setupConfiguration, "mode-selection");
+      onOpenComparisonMode();
       return;
     }
     setIsReady(true);
+  }
+
+  if (activeStep === "comparison-ahp" && selectedMode === "comparison") {
+    return (
+      <Suspense fallback={<Paper variant="outlined" sx={{ p: 4, borderRadius: "24px" }}><Typography color="text.secondary">Loading AHP configuration…</Typography></Paper>}>
+        <ComparisonAHPConfiguration
+          workspaceState={comparisonAhp}
+          onWorkspaceStateChange={(state) => {
+            setComparisonAhp(state);
+            persistState(selectedMode, selectedBattery, batteryConfiguration, setupConfiguration, "comparison-ahp", state);
+          }}
+          onBack={() => {
+            setActiveStep("mode-selection");
+            persistState(selectedMode, selectedBattery, batteryConfiguration, setupConfiguration, "mode-selection");
+          }}
+          onContinue={(state) => {
+            setComparisonAhp(state);
+            setIsReady(true);
+            setActiveStep("mode-selection");
+            persistState(selectedMode, selectedBattery, batteryConfiguration, setupConfiguration, "mode-selection", state);
+          }}
+        />
+      </Suspense>
+    );
   }
 
   if (activeStep !== "mode-selection" && selectedBatteryName) {
@@ -458,6 +546,7 @@ export default function OptimizationPage({
             onContinue={(configuration) => {
               setBatteryConfiguration(configuration);
               setActiveStep("single-setup");
+              persistState(selectedMode, selectedBattery, configuration, setupConfiguration, "single-setup");
             }}
           />
         </Box>
@@ -482,6 +571,7 @@ export default function OptimizationPage({
                   reconnecting: false,
                 });
                 setActiveStep("single-run");
+                persistState(selectedMode, selectedBattery, batteryConfiguration, setup, "single-run");
               }}
             />
           </Box>
@@ -496,8 +586,16 @@ export default function OptimizationPage({
                 setup={setupConfiguration}
                 runState={runState}
                 setRunState={setRunState}
-                onBackToSetup={() => setActiveStep("single-setup")}
-                onAdjustSearchBounds={() => setActiveStep("single-setup")}
+                onBackToSetup={() => {
+                  setActiveStep("single-setup");
+                  persistState(selectedMode, selectedBattery, batteryConfiguration, setupConfiguration, "single-setup");
+                }}
+                onAdjustSearchBounds={() => {
+                  setActiveStep("single-setup");
+                  persistState(selectedMode, selectedBattery, batteryConfiguration, setupConfiguration, "single-setup");
+                }}
+                operationalProfileDate={operationalProfileDate}
+                onOperationalProfileDateChange={onOperationalProfileDateChange}
               />
             </Suspense>
           </Box>
@@ -602,12 +700,13 @@ export default function OptimizationPage({
             Comparison workflow selected
           </Typography>
           <Typography variant="body2">
-            One fixed-type GA will run for each enabled battery before AHP and PROMETHEE II ranking. No optimization will run during this milestone.
+            Configure criteria weighting with the verified AHP service. No GA or PROMETHEE ranking will run during this milestone.
           </Typography>
+          {comparisonAhp?.accepted && <Chip icon={<CheckCircleRoundedIcon />} label="AHP weights ready" size="small" color="success" sx={{ mt: 1.25, fontWeight: 800 }} />}
         </Alert>
       )}
 
-      {isReady && selectedMode && (
+      {(isReady || (selectedMode === "comparison" && comparisonAhp?.accepted)) && selectedMode && (
         <Alert
           severity="success"
           icon={<CheckCircleRoundedIcon />}
@@ -619,7 +718,9 @@ export default function OptimizationPage({
           <Typography variant="body2">
             {selectedMode === "single"
               ? `${selectedBatteryName} is selected for single-battery optimization.`
-              : "Battery Comparison is selected for the future multi-battery workflow."} The GA has not been started.
+              : comparisonAhp?.accepted
+                ? "AHP weights ready. The accepted judgments are saved in this browser workspace."
+                : "Battery Comparison is selected for the future multi-battery workflow."} The GA has not been started.
           </Typography>
         </Alert>
       )}

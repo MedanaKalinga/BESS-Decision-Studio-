@@ -1,0 +1,48 @@
+{
+  "dataset_id": "c07b0ea2-0855-41da-9c17-24abb44d3f3e",
+  "filename": "pv_ev_data_15min_with_timestamp.csv",
+  "validation_summary": {
+    "valid": true,
+    "row_count": 35040,
+    "interval_minutes": 15,
+    "dataset_type": "normal_year",
+    "duration_days": 365,
+    "timestamps_generated": false,
+    "timestamp_source": "uploaded",
+    "notice": null,
+    "available_columns": [
+      "Timestamp",
+      "P_PV_kW",
+      "P_EV_kW"
+    ],
+    "detected_columns": {
+      "timestamp": "Timestamp",
+      "pv": "P_PV_kW",
+      "ev": "P_EV_kW",
+      "tariff": null
+    },
+    "missing_values": 0,
+    "duplicate_timestamps": 0,
+    "negative_pv_values": 0,
+    "negative_ev_values": 0,
+    "errors": [],
+    "warnings": []
+  },
+  "summary": {
+    "annual_pv_energy_kwh": 7292507.85,
+    "annual_ev_energy_kwh": 8903654.25,
+    "pv_peak_kw": 4086.75,
+    "ev_peak_kw": 3408.63,
+    "start_date": "2025-01-01",
+    "end_date": "2025-12-31"
+  },
+  "_processing": {
+    "use_manual_mapping": true,
+    "pv_column": "P_PV_kW",
+    "ev_column": "P_EV_kW",
+    "tariff_column": null,
+    "timestamp_column": "Timestamp",
+    "start_date": null,
+    "generate_timestamps": false
+  }
+}

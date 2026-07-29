@@ -68,6 +68,8 @@ interface SingleOptimizationRunProps {
   setRunState: Dispatch<SetStateAction<SingleOptimizationRunWorkspaceState>>;
   onBackToSetup: () => void;
   onAdjustSearchBounds: () => void;
+  operationalProfileDate: string | null;
+  onOperationalProfileDateChange: (date: string | null) => void;
 }
 
 function formatDuration(seconds: number) {
@@ -292,7 +294,7 @@ function ResultMetrics({ result }: { result: SingleOptimizationFinalResult }) {
   return <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))", xl: "repeat(3, minmax(0, 1fr))" }, gap: 1.25 }}>{metrics.map(([label, value]) => <ReviewItem key={label} label={label} value={value} />)}</Box>;
 }
 
-export default function SingleOptimizationRun({ battery, dataset, dispatchStrategy, setup, runState, setRunState, onBackToSetup, onAdjustSearchBounds }: SingleOptimizationRunProps) {
+export default function SingleOptimizationRun({ battery, dataset, dispatchStrategy, setup, runState, setRunState, onBackToSetup, onAdjustSearchBounds, operationalProfileDate, onOperationalProfileDateChange }: SingleOptimizationRunProps) {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const pollFailures = useRef(0);
   const pollActive = ["queued", "running", "cancelling"].includes(runState.phase) && Boolean(runState.jobId);
@@ -433,7 +435,7 @@ export default function SingleOptimizationRun({ battery, dataset, dispatchStrate
             <Paper elevation={0} sx={{ overflow: "hidden", borderRadius: "27px", border: "1px solid #efc46d", boxShadow: "0 22px 54px rgba(180,83,9,0.1)" }}><Box sx={{ p: { xs: 2.3, sm: 3 }, background: "linear-gradient(120deg, #fff7df, #fffaf0)" }}><Stack direction="row" spacing={1.2}><WarningAmberRoundedIcon sx={{ color: "#b45309", fontSize: 34 }} /><Box><Typography variant="overline" sx={{ color: "#9a6700", fontWeight: 850 }}>DIAGNOSTIC RESULT · NOT A FEASIBLE OPTIMUM</Typography><Typography variant="h5" sx={{ mt: 0.35, fontWeight: 900 }}>No candidate within the selected search bounds satisfied all technical constraints.</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: 0.7 }}>The best penalized candidate is shown only to help you adjust the search region.</Typography></Box></Stack></Box><Box sx={{ p: { xs: 2.3, sm: 3 } }}><Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))", lg: "repeat(5, minmax(0, 1fr))" }, gap: 1.2 }}><MetricCard label="Diagnostic capacity" value={`${numberFormatter.format(result.best_bess_capacity_kwh)} kWh`} /><MetricCard label="Diagnostic peak support" value={percent(result.best_peak_support_pct)} /><MetricCard label="Raw annual cost" value={currencyFormatter.format(result.total_annual_cost_rs)} tone="blue" /><MetricCard label="Technical penalty" value={currencyFormatter.format(result.total_penalty_rs)} tone="amber" /><MetricCard label="Penalized fitness" value={currencyFormatter.format(result.fitness_rs)} tone="amber" /></Box><Box sx={{ mt: 1.5, display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(2, minmax(0, 1fr))" }, gap: 1.2 }}><ConstraintStatus label="Peak-support success" value={result.peak_support_success_pct} threshold={result.peak_support_threshold_pct} passed={result.peak_support_constraint_passed} /><ConstraintStatus label="PV self-consumption" value={result.pv_self_consumption_pct} threshold={result.pv_self_consumption_threshold_pct} passed={result.pv_self_consumption_constraint_passed} /></Box><Alert severity="warning" sx={{ mt: 1.5, borderRadius: "15px" }}>Failed constraints: {[!result.peak_support_constraint_passed && "peak-support success", !result.pv_self_consumption_constraint_passed && "PV self-consumption"].filter(Boolean).join(" and ")}.</Alert><Stack direction={{ xs: "column", sm: "row" }} spacing={1.2} sx={{ mt: 2 }}><Button variant="contained" startIcon={<TuneRoundedIcon />} onClick={onAdjustSearchBounds} sx={{ background: "linear-gradient(100deg, #b45309, #d97706)" }}>Adjust Search Bounds</Button><Button startIcon={<ArrowBackRoundedIcon />} onClick={onBackToSetup}>Return to Setup</Button></Stack></Box></Paper>
           )}
           <Suspense fallback={<Paper variant="outlined" sx={{ p: 3, borderRadius: "24px" }}><Stack direction="row" spacing={1.2} sx={{ alignItems: "center" }}><CircularProgress size={22} /><Typography color="text.secondary">Loading operational profile workspace…</Typography></Stack></Paper>}>
-            <OperationalProfiles jobId={runState.jobId} dataset={dataset} result={result} />
+            <OperationalProfiles jobId={runState.jobId} dataset={dataset} result={result} selectedDate={operationalProfileDate} onDateChange={onOperationalProfileDateChange} />
           </Suspense>
         </>
       )}

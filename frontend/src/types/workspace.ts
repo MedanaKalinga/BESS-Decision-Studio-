@@ -26,6 +26,231 @@ export interface WorkspaceDispatchStrategy {
   periods: WorkspaceDispatchPeriod[];
 }
 
+export type AHPConsistencyStatus = "ACCEPTABLE" | "REVIEW REQUIRED";
+
+export interface AHPCalculationResult {
+  columnSums: number[];
+  normalizedMatrix: number[][];
+  weights: number[];
+  lambdaMax: number;
+  consistencyIndex: number;
+  randomIndex: number;
+  consistencyRatio: number;
+  status: AHPConsistencyStatus;
+}
+
+export interface ComparisonAHPWorkspaceState {
+  matrix: number[][];
+  calculation: AHPCalculationResult | null;
+  accepted: boolean;
+  revision: number;
+  calculatedAt: string | null;
+}
+
+export interface ComparisonBatteryConfiguration {
+  name: string;
+  price_rs_per_kwh: number;
+  rated_cycle_life: number;
+  eta_ch: number;
+  eta_dis: number;
+  weight_density_kg_per_kwh: number;
+  warranty_years: number;
+}
+
+export interface ComparisonBatteryOption {
+  id: string;
+  enabled: boolean;
+  battery: ComparisonBatteryConfiguration;
+}
+
+export interface ComparisonGASettings {
+  populationSize: number;
+  generations: number;
+  mutationProbability: number;
+  eliteCount: number;
+  randomSeed: number;
+}
+
+export interface ComparisonEconomicSettings {
+  projectLifeYears: number;
+  discountRate: number;
+  exportTariffRsPerKwh: number;
+  annualOmFraction: number;
+  replacementCostFraction: number;
+  residualValueEnabled: boolean;
+}
+
+export interface ComparisonOptimizationConfiguration {
+  revision: number;
+  batteryConfigurationRevision: number;
+  batteries: ComparisonBatteryOption[];
+  minimumBessCapacityKwh: number;
+  maximumBessCapacityKwh: number;
+  minimumPeakSupportPct: number;
+  maximumPeakSupportPct: number;
+  gaSettings: ComparisonGASettings;
+  economicSettings: ComparisonEconomicSettings;
+  savedAt: string | null;
+}
+
+export interface ComparisonBatteryResult {
+  battery_name: string;
+  input_battery_configuration: ComparisonBatteryConfiguration;
+  best_bess_capacity_kwh: number;
+  best_peak_support_pct: number;
+  best_total_annual_cost_rs: number;
+  best_fitness_rs: number;
+  solution_status: "feasible_solution" | "no_feasible_candidate";
+  solution_message: string;
+  ga_generations_completed: number;
+  total_fitness_evaluations: number;
+  runtime_seconds: number;
+  cycle_based_life_years: number;
+  round_trip_efficiency: number;
+  weight_density_kg_per_kwh: number;
+  warranty_years: number;
+  annual_om_cost_rs: number;
+  failed_constraints: string[];
+  total_penalty_rs: number;
+  is_feasible: boolean;
+  peak_support_success_pct: number;
+  pv_self_consumption_pct: number;
+  replacement_years: number[];
+}
+
+export interface ComparisonOptimizationFinalResult {
+  battery_results: ComparisonBatteryResult[];
+  comparison_solution_status:
+    | "completed_all_batteries"
+    | "completed_with_infeasible_alternatives";
+  feasible_battery_count: number;
+  infeasible_battery_count: number;
+}
+
+export interface ComparisonOptimizationWorkspaceState {
+  jobId: string;
+  status: "completed";
+  revision: string;
+  batteryConfigurationSignature: string;
+  inputSignature: string;
+  submittedConfigurationRevision: number;
+  submittedBatteryConfigurationRevision: number;
+  stale: boolean;
+  finalResult: ComparisonOptimizationFinalResult;
+  completedAt: string;
+}
+
+export type ComparisonJobLifecycleStatus =
+  | "queued"
+  | "running"
+  | "cancelling"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export interface ComparisonOptimizationJobResponse {
+  job_id: string;
+  status: ComparisonJobLifecycleStatus;
+  progress_percent: number;
+  overall_progress_percent: number;
+  current_generation: number;
+  total_generations: number;
+  evaluations_completed: number;
+  estimated_total_evaluations: number;
+  current_battery_index: number;
+  current_battery_id: string | null;
+  current_battery_name: string | null;
+  current_battery_evaluations_completed: number;
+  current_battery_estimated_evaluations: number;
+  total_evaluations_completed: number;
+  total_estimated_evaluations: number;
+  completed_battery_count: number;
+  total_batteries: number;
+  current_best_capacity_kwh: number | null;
+  current_best_peak_support_pct: number | null;
+  current_best_total_annual_cost_rs: number | null;
+  current_best_raw_cost_rs: number | null;
+  current_best_fitness_rs: number | null;
+  current_best_is_feasible: boolean | null;
+  battery_results: ComparisonBatteryResult[];
+  partial_results: ComparisonBatteryResult[];
+  error: string | null;
+  final_result: ComparisonOptimizationFinalResult | null;
+}
+
+export type ComparisonRunPhase =
+  | "ready"
+  | "submitting"
+  | ComparisonJobLifecycleStatus
+  | "expired";
+
+export interface ComparisonRunError {
+  code?: string;
+  message: string;
+}
+
+export interface ComparisonRunWorkspaceState {
+  phase: ComparisonRunPhase;
+  jobId: string | null;
+  submittedConfigurationRevision: number | null;
+  submittedBatteryConfigurationRevision: number | null;
+  submittedInputSignature: string | null;
+  latestJob: ComparisonOptimizationJobResponse | null;
+  maximumObservedProgressPercent: number;
+  error: ComparisonRunError | null;
+  startedAt: number | null;
+  finishedAt: number | null;
+  reconnecting: boolean;
+}
+
+export type PrometheeScientificStatus =
+  | "ranking_completed"
+  | "insufficient_feasible_alternatives"
+  | "no_feasible_alternatives";
+
+export interface PrometheeExcludedAlternative {
+  battery_name: string;
+  solution_status: "feasible_solution" | "no_feasible_candidate";
+  failed_constraints: string[];
+}
+
+export interface PrometheeRankedAlternative {
+  battery_name: string;
+  rank: number;
+  positive_flow: number;
+  negative_flow: number;
+  net_flow: number;
+}
+
+export interface PrometheeCalculationResult {
+  scientific_status: PrometheeScientificStatus;
+  accepted_ahp_revision: number | string | null;
+  criteria_order: string[];
+  criterion_directions: Array<"minimize" | "maximize">;
+  normalized_weights: number[];
+  raw_decision_matrix: number[][];
+  observed_ranges: number[];
+  q_thresholds: number[];
+  p_thresholds: number[];
+  feasible_alternative_names: string[];
+  excluded_alternatives: PrometheeExcludedAlternative[];
+  criterion_preference_matrices: Record<string, number[][]>;
+  aggregated_preference_matrix: number[][];
+  positive_flows: number[];
+  negative_flows: number[];
+  net_flows: number[];
+  ordered_ranking: PrometheeRankedAlternative[];
+  recommended_battery: string | null;
+}
+
+export interface PrometheeWorkspaceState {
+  result: PrometheeCalculationResult;
+  comparisonRevision: string;
+  batteryConfigurationSignature: string;
+  ahpRevision: number;
+  calculatedAt: string;
+}
+
 export interface SingleBatteryConfigurationSnapshot {
   catalogueName: string;
   batteryName: string;
@@ -203,6 +428,25 @@ export interface OperationalProfileDailySummary {
   bess_discharge_energy_kwh: number;
   minimum_soc_pct: number;
   maximum_soc_pct: number;
+}
+
+export interface PersistedWorkspaceState {
+  version: 1;
+  activePage: string;
+  dataset: WorkspaceDatasetSummary | null;
+  dispatchStrategy: WorkspaceDispatchStrategy;
+  battery: SingleBatteryConfigurationSnapshot | null;
+  setup: SingleOptimizationSetupSnapshot | null;
+  runState: SingleOptimizationRunWorkspaceState;
+  selectedBatteryId: string | null;
+  selectedMode: "single" | "comparison" | null;
+  activeOptimizationStep: string | null;
+  operationalProfileDate: string | null;
+  comparisonAhp: ComparisonAHPWorkspaceState | null;
+  comparisonConfiguration: ComparisonOptimizationConfiguration | null;
+  comparisonRunState: ComparisonRunWorkspaceState;
+  comparisonOptimization: ComparisonOptimizationWorkspaceState | null;
+  promethee: PrometheeWorkspaceState | null;
 }
 
 export interface SingleOptimizationOperationalProfile {

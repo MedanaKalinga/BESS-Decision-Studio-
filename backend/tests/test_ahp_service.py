@@ -57,6 +57,18 @@ class TestAHPService(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "must be square"):
             calculate_ahp([[1.0, 2.0], [0.5]])
 
+    def test_perfectly_consistent_matrix_has_near_zero_consistency_ratio(self) -> None:
+        priorities = [9.0, 6.0, 4.0, 3.0, 2.0, 1.0]
+        matrix = [
+            [row_priority / column_priority for column_priority in priorities]
+            for row_priority in priorities
+        ]
+
+        result = calculate_ahp(matrix)
+
+        self.assertAlmostEqual(result["consistency_ratio"], 0.0, places=12)
+        self.assertEqual(result["status"], "ACCEPTABLE")
+
     def test_rejects_square_matrix_that_is_not_six_by_six(self) -> None:
         with self.assertRaisesRegex(ValueError, "configured criteria"):
             calculate_ahp([[1.0, 1.0], [1.0, 1.0]])

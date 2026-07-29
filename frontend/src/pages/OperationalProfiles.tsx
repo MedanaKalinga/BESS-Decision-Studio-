@@ -176,12 +176,20 @@ function errorMessage(payload: unknown, status: number) {
   return `The profile request failed with HTTP ${status}.`;
 }
 
-export default function OperationalProfiles({ jobId, dataset, result }: { jobId: string | null; dataset: WorkspaceDatasetSummary | null; result: SingleOptimizationFinalResult }) {
-  const [selectedDate, setSelectedDate] = useState(dataset?.startDate ?? "");
+export default function OperationalProfiles({ jobId, dataset, result, selectedDate: initialDate, onDateChange }: { jobId: string | null; dataset: WorkspaceDatasetSummary | null; result: SingleOptimizationFinalResult; selectedDate: string | null; onDateChange: (date: string | null) => void; }) {
+  const [selectedDate, setSelectedDate] = useState(initialDate ?? dataset?.startDate ?? "");
   const [profile, setProfile] = useState<SingleOptimizationOperationalProfile | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<{ code: string; message: string } | null>(null);
   const [requestVersion, setRequestVersion] = useState(0);
+
+  useEffect(() => {
+    if (!dataset || !selectedDate) {
+      onDateChange(null);
+      return;
+    }
+    onDateChange(selectedDate);
+  }, [dataset, onDateChange, selectedDate]);
 
   useEffect(() => {
     if (!jobId || !dataset || !selectedDate) return;

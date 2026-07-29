@@ -1,5 +1,5 @@
-import { lazy, Suspense, useEffect, useState } from "react";
-import type { ElementType } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import type { Dispatch, ElementType, SetStateAction } from "react";
 import AccessTimeRoundedIcon from "@mui/icons-material/AccessTimeRounded";
 import ArrowDownwardRoundedIcon from "@mui/icons-material/ArrowDownwardRounded";
 import ArrowUpwardRoundedIcon from "@mui/icons-material/ArrowUpwardRounded";
@@ -54,16 +54,36 @@ import {
   Typography,
 } from "@mui/material";
 import type {
+  PersistedWorkspaceState,
+  ComparisonAHPWorkspaceState,
+  ComparisonOptimizationWorkspaceState,
+  ComparisonOptimizationConfiguration,
+  ComparisonRunWorkspaceState,
+  PrometheeWorkspaceState,
+  SingleBatteryConfigurationSnapshot,
   SingleOptimizationRunWorkspaceState,
+  SingleOptimizationSetupSnapshot,
   WorkspaceDatasetSummary,
   WorkspaceDispatchStrategy,
 } from "./types/workspace";
+import {
+  buildPersistedWorkspaceState,
+  clearPersistedWorkspaceState,
+  readPersistedWorkspaceState,
+  shouldRenderOperationalProfiles,
+  validatePersistedWorkspaceState,
+  writePersistedWorkspaceState,
+} from "./lib/workspacePersistence";
+import { INITIAL_COMPARISON_RUN_STATE, buildComparisonInputSignature, createDefaultComparisonConfiguration, synchronizeComparisonSnapshot, transitionFromComparisonRunner } from "./lib/comparisonOptimization";
+import { canEnterComparisonResults, isPrometheeResultStale } from "./lib/comparisonResults";
 
 
 const DRAWER_WIDTH = 264;
 const CONFIG_DEFAULTS_ENDPOINT = "/api/config/defaults";
 const DataUploadPage = lazy(() => import("./pages/DataUploadPage"));
 const OptimizationPage = lazy(() => import("./pages/OptimizationPage"));
+const ComparisonResultsDialog = lazy(() => import("./pages/ComparisonResultsDialog"));
+const ComparisonOptimizationDialog = lazy(() => import("./pages/ComparisonOptimizationDialog"));
 
 const INITIAL_WORKSPACE_DISPATCH_STRATEGY: WorkspaceDispatchStrategy = {
   status: "Reference Strategy",
@@ -125,14 +145,33 @@ const INITIAL_SINGLE_OPTIMIZATION_RUN_STATE: SingleOptimizationRunWorkspaceState
   reconnecting: false,
 };
 
+const INITIAL_PERSISTED_WORKSPACE_STATE: PersistedWorkspaceState = {
+  version: 1,
+  activePage: "Comparison Mode",
+  dataset: null,
+  dispatchStrategy: INITIAL_WORKSPACE_DISPATCH_STRATEGY,
+  battery: null,
+  setup: null,
+  runState: INITIAL_SINGLE_OPTIMIZATION_RUN_STATE,
+  selectedBatteryId: null,
+  selectedMode: null,
+  activeOptimizationStep: null,
+  operationalProfileDate: null,
+  comparisonAhp: null,
+  comparisonConfiguration: null,
+  comparisonRunState: INITIAL_COMPARISON_RUN_STATE,
+  comparisonOptimization: null,
+  promethee: null,
+};
+
 type BatteryTypeName = "Low-cost" | "Medium-low" | "Medium" | "Medium-high";
 type CriterionDirection = "minimize" | "maximize";
 type CriterionName =
-  | "total_annual_cost_Rs"
+  | "total_annual_cost_rs"
   | "cycle_based_life_years"
   | "round_trip_efficiency"
   | "weight_density_kg_per_kwh"
-  | "bess_om_cost_annual_Rs"
+  | "annual_om_cost_rs"
   | "warranty_years";
 type ActivePage = "Comparison Mode" | "Dispatch" | "Data Upload" | "Optimization";
 type DispatchPeriodName = "Off-peak 1" | "Day" | "Peak" | "Off-peak 2";
@@ -210,12 +249,12 @@ const navigationItems: NavigationItem[] = [
 ];
 
 const criterionLabels: Record<CriterionName, string> = {
-  total_annual_cost_Rs: "Total annual cost",
-  cycle_based_life_years: "Cycle-based life",
-  round_trip_efficiency: "Round-trip efficiency",
-  weight_density_kg_per_kwh: "Weight density",
-  bess_om_cost_annual_Rs: "Annual BESS O&M cost",
-  warranty_years: "Warranty period",
+  total_annual_cost_rs: "Total Annual Cost",
+  cycle_based_life_years: "Cycle-Based Service Life",
+  round_trip_efficiency: "Round-Trip Efficiency",
+  weight_density_kg_per_kwh: "Weight Density",
+  annual_om_cost_rs: "Annual O&M Cost",
+  warranty_years: "Warranty Period",
 };
 
 const priceFormatter = new Intl.NumberFormat("en-LK", {
@@ -1974,11 +2013,41 @@ function DispatchStrategyPage({
   );
 }
 
-function ComparisonModePage() {
+function ComparisonModePage({
+  dataset,
+  dispatchStrategy,
+  comparisonConfiguration,
+  comparisonRunState,
+  comparisonOptimization,
+  comparisonAhp,
+  promethee,
+  onComparisonConfigurationChange,
+  onComparisonRunStateChange,
+  onComparisonCompleted,
+  onInvalidateScientificState,
+  onOpenAHP,
+  onPrometheeChange,
+}: {
+  dataset: WorkspaceDatasetSummary | null;
+  dispatchStrategy: WorkspaceDispatchStrategy;
+  comparisonConfiguration: ComparisonOptimizationConfiguration | null;
+  comparisonRunState: ComparisonRunWorkspaceState;
+  comparisonOptimization: ComparisonOptimizationWorkspaceState | null;
+  comparisonAhp: ComparisonAHPWorkspaceState | null;
+  promethee: PrometheeWorkspaceState | null;
+  onComparisonConfigurationChange: (configuration: ComparisonOptimizationConfiguration) => void;
+  onComparisonRunStateChange: Dispatch<SetStateAction<ComparisonRunWorkspaceState>>;
+  onComparisonCompleted: (comparison: ComparisonOptimizationWorkspaceState) => void;
+  onInvalidateScientificState: () => void;
+  onOpenAHP: () => void;
+  onPrometheeChange: (state: PrometheeWorkspaceState) => void;
+}) {
   const [configuration, setConfiguration] = useState<DefaultConfiguration | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [requestVersion, setRequestVersion] = useState(0);
+  const [resultsOpen, setResultsOpen] = useState(false);
+  const [runnerOpen, setRunnerOpen] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -2025,6 +2094,19 @@ function ComparisonModePage() {
     void loadDefaults();
     return () => controller.abort();
   }, [requestVersion]);
+
+  useEffect(() => {
+    if (configuration && !comparisonConfiguration) {
+      onComparisonConfigurationChange(createDefaultComparisonConfiguration(configuration.battery_types));
+    }
+  }, [comparisonConfiguration, configuration, onComparisonConfigurationChange]);
+
+  const rankingReady = Boolean(
+    promethee
+    && comparisonOptimization
+    && !isPrometheeResultStale(promethee, comparisonOptimization, comparisonAhp),
+  );
+  const resultsEntryReady = canEnterComparisonResults(comparisonOptimization, comparisonAhp);
 
   return (
     <Stack spacing={3.5}>
@@ -2079,6 +2161,31 @@ function ComparisonModePage() {
               />
             </Stack>
           )}
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={1.2} sx={{ mt: 2.25, alignItems: { sm: "center" } }}>
+            <Button
+              variant="contained"
+              startIcon={<CompareArrowsRoundedIcon />}
+              onClick={() => setRunnerOpen(true)}
+              disabled={!configuration || !comparisonConfiguration}
+              sx={{ alignSelf: { xs: "stretch", sm: "flex-start" }, background: "linear-gradient(100deg,#0f766e,#1769a8)" }}
+            >
+              Configure & Run Comparison
+            </Button>
+            <Button
+              variant="outlined"
+              startIcon={<AssessmentRoundedIcon />}
+              onClick={() => setResultsOpen(true)}
+              disabled={!resultsEntryReady}
+              sx={{ alignSelf: { xs: "stretch", sm: "flex-start" } }}
+            >
+              {rankingReady ? "Open Comparison Results" : "Calculate & Open Comparison Results"}
+            </Button>
+            <Stack direction="row" spacing={0.8} sx={{ flexWrap: "wrap", gap: 0.8 }}>
+              <Chip label={comparisonOptimization && !comparisonOptimization.stale ? "Stage 1 ready" : comparisonOptimization?.stale ? "Stage 1 stale" : "Stage 1 required"} size="small" color={comparisonOptimization && !comparisonOptimization.stale ? "success" : comparisonOptimization?.stale ? "warning" : "default"} variant="outlined" />
+              <Chip label={comparisonAhp?.accepted ? "AHP ready" : "AHP required"} size="small" color={comparisonAhp?.accepted ? "success" : "default"} variant="outlined" />
+              <Chip label={rankingReady ? "Ranking ready" : promethee ? "PROMETHEE stale" : "PROMETHEE pending"} size="small" color={rankingReady ? "success" : promethee ? "warning" : "default"} variant="outlined" />
+            </Stack>
+          </Stack>
         </Box>
       </Paper>
 
@@ -2197,28 +2304,243 @@ function ComparisonModePage() {
           </Box>
         </>
       )}
+      <Suspense fallback={null}>
+        {configuration && comparisonConfiguration && <ComparisonOptimizationDialog
+          open={runnerOpen}
+          configuration={comparisonConfiguration}
+          dataset={dataset}
+          dispatchStrategy={dispatchStrategy}
+          runState={comparisonRunState}
+          completedComparison={comparisonOptimization}
+          rankingReady={rankingReady}
+          onConfigurationChange={onComparisonConfigurationChange}
+          onRunStateChange={onComparisonRunStateChange}
+          onCompleted={onComparisonCompleted}
+          onInvalidateScientificState={onInvalidateScientificState}
+          onOpenAHP={() => transitionFromComparisonRunner(() => setRunnerOpen(false), onOpenAHP)}
+          onOpenResults={() => {
+            transitionFromComparisonRunner(() => setRunnerOpen(false), () => setResultsOpen(true));
+          }}
+          onClose={() => setRunnerOpen(false)}
+        />}
+        <ComparisonResultsDialog
+          open={resultsOpen}
+          comparison={comparisonOptimization}
+          ahp={comparisonAhp}
+          promethee={promethee}
+          onPrometheeChange={onPrometheeChange}
+          onClose={() => setResultsOpen(false)}
+        />
+      </Suspense>
     </Stack>
   );
 }
 
 export default function App() {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [activePage, setActivePage] = useState<ActivePage>("Comparison Mode");
+  const [activePage, setActivePage] = useState<ActivePage>(
+    INITIAL_PERSISTED_WORKSPACE_STATE.activePage as ActivePage,
+  );
   const [uploadedDataset, setUploadedDataset] =
-    useState<WorkspaceDatasetSummary | null>(null);
+    useState<WorkspaceDatasetSummary | null>(INITIAL_PERSISTED_WORKSPACE_STATE.dataset);
   const [workspaceDispatchStrategy, setWorkspaceDispatchStrategy] =
-    useState<WorkspaceDispatchStrategy>(INITIAL_WORKSPACE_DISPATCH_STRATEGY);
+    useState<WorkspaceDispatchStrategy>(INITIAL_PERSISTED_WORKSPACE_STATE.dispatchStrategy);
   const [singleOptimizationRunState, setSingleOptimizationRunState] =
-    useState<SingleOptimizationRunWorkspaceState>(INITIAL_SINGLE_OPTIMIZATION_RUN_STATE);
+    useState<SingleOptimizationRunWorkspaceState>(INITIAL_PERSISTED_WORKSPACE_STATE.runState);
+  const [selectedBatteryId, setSelectedBatteryId] = useState<string | null>(
+    INITIAL_PERSISTED_WORKSPACE_STATE.selectedBatteryId,
+  );
+  const [selectedMode, setSelectedMode] = useState<"single" | "comparison" | null>(
+    INITIAL_PERSISTED_WORKSPACE_STATE.selectedMode,
+  );
+  const [batteryConfiguration, setBatteryConfiguration] =
+    useState<SingleBatteryConfigurationSnapshot | null>(INITIAL_PERSISTED_WORKSPACE_STATE.battery);
+  const [setupConfiguration, setSetupConfiguration] =
+    useState<SingleOptimizationSetupSnapshot | null>(INITIAL_PERSISTED_WORKSPACE_STATE.setup);
+  const [activeOptimizationStep, setActiveOptimizationStep] = useState<string | null>(
+    INITIAL_PERSISTED_WORKSPACE_STATE.activeOptimizationStep,
+  );
+  const [operationalProfileDate, setOperationalProfileDate] = useState<string | null>(
+    INITIAL_PERSISTED_WORKSPACE_STATE.operationalProfileDate,
+  );
+  const [comparisonAhp, setComparisonAhp] = useState<ComparisonAHPWorkspaceState | null>(
+    INITIAL_PERSISTED_WORKSPACE_STATE.comparisonAhp,
+  );
+  const [comparisonConfiguration, setComparisonConfiguration] = useState<ComparisonOptimizationConfiguration | null>(
+    INITIAL_PERSISTED_WORKSPACE_STATE.comparisonConfiguration,
+  );
+  const [comparisonRunState, setComparisonRunState] = useState<ComparisonRunWorkspaceState>(
+    INITIAL_PERSISTED_WORKSPACE_STATE.comparisonRunState,
+  );
+  const [comparisonOptimization, setComparisonOptimization] = useState<ComparisonOptimizationWorkspaceState | null>(
+    INITIAL_PERSISTED_WORKSPACE_STATE.comparisonOptimization,
+  );
+  const [promethee, setPromethee] = useState<PrometheeWorkspaceState | null>(
+    INITIAL_PERSISTED_WORKSPACE_STATE.promethee,
+  );
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+  const [workspaceReady, setWorkspaceReady] = useState(false);
+
+  useEffect(() => {
+    const storage = window.sessionStorage;
+    const persisted = readPersistedWorkspaceState(storage);
+
+    if (!persisted) {
+      setWorkspaceReady(true);
+      return;
+    }
+
+    void validatePersistedWorkspaceState(persisted, {
+      datasetExists: async (datasetId: string, startDate: string) => {
+        try {
+          const response = await fetch(`/api/datasets/${encodeURIComponent(datasetId)}/day?date=${encodeURIComponent(startDate || "2000-01-01")}`, {
+            method: "GET",
+            headers: { Accept: "application/json" },
+          });
+          return response.status !== 404;
+        } catch {
+          return true;
+        }
+      },
+      jobExists: async (jobId: string) => {
+        try {
+          const response = await fetch(`/api/single-optimization/jobs/${encodeURIComponent(jobId)}`);
+          return response.status !== 404;
+        } catch {
+          return true;
+        }
+      },
+      comparisonJobExists: async (jobId: string) => {
+        try {
+          const response = await fetch(`/api/comparison-optimization/jobs/${encodeURIComponent(jobId)}`);
+          return response.status !== 404;
+        } catch {
+          return true;
+        }
+      },
+    }).then(({ state, error }) => {
+      if (error) {
+        setRestoreError(error);
+        if (!state) clearPersistedWorkspaceState(storage);
+      }
+
+      if (state) {
+        setActivePage(state.activePage as ActivePage);
+        setUploadedDataset(state.dataset);
+        setWorkspaceDispatchStrategy(state.dispatchStrategy);
+        setSingleOptimizationRunState(state.runState);
+        setSelectedBatteryId(state.selectedBatteryId);
+        setSelectedMode(state.selectedMode);
+        setBatteryConfiguration(state.battery);
+        setSetupConfiguration(state.setup);
+        setActiveOptimizationStep(state.activeOptimizationStep);
+        setOperationalProfileDate(state.operationalProfileDate);
+        setComparisonAhp(state.comparisonAhp);
+        setComparisonConfiguration(state.comparisonConfiguration);
+        setComparisonRunState(state.comparisonRunState);
+        setComparisonOptimization(state.comparisonOptimization);
+        setPromethee(state.promethee);
+      }
+      setWorkspaceReady(true);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!workspaceReady) {
+      return;
+    }
+
+    const storage = window.sessionStorage;
+    const state = buildPersistedWorkspaceState({
+      activePage,
+      dataset: uploadedDataset,
+      dispatchStrategy: workspaceDispatchStrategy,
+      battery: batteryConfiguration,
+      setup: setupConfiguration,
+      runState: singleOptimizationRunState,
+      selectedBatteryId,
+      selectedMode,
+      activeOptimizationStep,
+      operationalProfileDate,
+      comparisonAhp,
+      comparisonConfiguration,
+      comparisonRunState,
+      comparisonOptimization,
+      promethee,
+    });
+    writePersistedWorkspaceState(storage, state);
+  }, [activePage, uploadedDataset, workspaceDispatchStrategy, batteryConfiguration, setupConfiguration, singleOptimizationRunState, selectedBatteryId, selectedMode, activeOptimizationStep, operationalProfileDate, comparisonAhp, comparisonConfiguration, comparisonRunState, comparisonOptimization, promethee, workspaceReady]);
+
+  const invalidateComparisonScience = useCallback(() => {
+    setComparisonOptimization((current) => current ? { ...current, stale: true } : current);
+    setComparisonAhp((current) => current?.accepted ? { ...current, accepted: false } : current);
+  }, []);
+
+  useEffect(() => {
+    if (!comparisonConfiguration || !comparisonOptimization || comparisonOptimization.stale) return;
+    const currentSignature = buildComparisonInputSignature(comparisonConfiguration, uploadedDataset, workspaceDispatchStrategy);
+    if (synchronizeComparisonSnapshot(comparisonOptimization, currentSignature)?.stale) invalidateComparisonScience();
+  }, [comparisonConfiguration, comparisonOptimization, invalidateComparisonScience, uploadedDataset, workspaceDispatchStrategy]);
+
+  const openComparisonAHP = useCallback(() => {
+    setSelectedMode("comparison");
+    setActiveOptimizationStep("comparison-ahp");
+    setActivePage("Optimization");
+  }, []);
 
   const handleNavigate = (page: ActivePage) => {
     setActivePage(page);
     setMobileOpen(false);
   };
 
+  const handleOptimizationStateChange = (nextState: {
+    selectedMode: "single" | "comparison" | null;
+    selectedBatteryId: string | null;
+    batteryConfiguration: SingleBatteryConfigurationSnapshot | null;
+    setupConfiguration: SingleOptimizationSetupSnapshot | null;
+    activeStep: string | null;
+    comparisonAhp: ComparisonAHPWorkspaceState | null;
+  }) => {
+    setSelectedMode(nextState.selectedMode);
+    setSelectedBatteryId(nextState.selectedBatteryId);
+    setBatteryConfiguration(nextState.batteryConfiguration);
+    setSetupConfiguration(nextState.setupConfiguration);
+    setActiveOptimizationStep(nextState.activeStep);
+    setComparisonAhp(nextState.comparisonAhp);
+  };
+
+  const workspaceStatus = useMemo(() => {
+    const datasetStatus = uploadedDataset ? "Available" : "Missing";
+    let optimizationStatus = "Not started";
+    if (singleOptimizationRunState.phase === "queued" || singleOptimizationRunState.phase === "running" || singleOptimizationRunState.phase === "cancelling" || singleOptimizationRunState.phase === "submitting") {
+      optimizationStatus = "Running";
+    } else if (singleOptimizationRunState.phase === "completed") {
+      optimizationStatus = "Completed";
+    } else if (restoreError && singleOptimizationRunState.phase === "ready" && singleOptimizationRunState.jobId === null) {
+      optimizationStatus = "Expired";
+    }
+
+    const profilesStatus = shouldRenderOperationalProfiles(singleOptimizationRunState.latestJob?.final_result ?? null) && singleOptimizationRunState.phase === "completed"
+      ? "Available"
+      : (singleOptimizationRunState.phase === "completed" ? "Waiting" : "Waiting");
+
+    return { datasetStatus, optimizationStatus, profilesStatus };
+  }, [restoreError, singleOptimizationRunState]);
+
   const sidebar = (
     <SidebarContent activePage={activePage} onNavigate={handleNavigate} />
   );
+
+  if (!workspaceReady) {
+    return (
+      <Box sx={{ display: "grid", minHeight: "100vh", placeItems: "center", bgcolor: "background.default" }}>
+        <Paper variant="outlined" sx={{ p: 4, borderRadius: "24px", minWidth: { xs: 280, sm: 360 } }}>
+          <Typography variant="h6" sx={{ fontWeight: 850 }}>Restoring workspace…</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>Recovering the current dataset, optimization state, and profile selection from the browser session.</Typography>
+        </Paper>
+      </Box>
+    );
+  }
 
   return (
     <Box sx={{ display: "flex", minHeight: "100vh", bgcolor: "background.default" }}>
@@ -2337,6 +2659,25 @@ export default function App() {
       >
         <Toolbar sx={{ minHeight: "72px !important" }} />
         <Box sx={{ width: "100%", maxWidth: 1540, mx: "auto", p: { xs: 2, sm: 3, lg: 4 } }}>
+          {restoreError && (
+            <Alert severity="warning" sx={{ mb: 2.5, borderRadius: "16px" }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 850 }}>Workspace restore notice</Typography>
+              <Typography variant="body2">{restoreError}</Typography>
+            </Alert>
+          )}
+          <Paper elevation={0} sx={{ mb: 2.5, p: { xs: 1.6, sm: 2.1 }, borderRadius: "20px", border: "1px solid #dce7ec", background: "linear-gradient(135deg, #f8fffd 0%, #f7fbff 100%)" }}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={1.25} sx={{ justifyContent: "space-between", alignItems: { sm: "center" } }}>
+              <Box>
+                <Typography variant="subtitle2" sx={{ fontWeight: 850 }}>Workspace status</Typography>
+                <Typography variant="body2" color="text.secondary">Your current dataset, optimization run, and operational profiles stay available across navigation and refresh.</Typography>
+              </Box>
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+                <Chip size="small" label={`Dataset: ${workspaceStatus.datasetStatus}`} color={workspaceStatus.datasetStatus === "Available" ? "success" : "default"} variant="outlined" />
+                <Chip size="small" label={`Optimization: ${workspaceStatus.optimizationStatus}`} color={workspaceStatus.optimizationStatus === "Completed" ? "success" : workspaceStatus.optimizationStatus === "Running" ? "info" : workspaceStatus.optimizationStatus === "Expired" ? "warning" : "default"} variant="outlined" />
+                <Chip size="small" label={`Profiles: ${workspaceStatus.profilesStatus}`} color={workspaceStatus.profilesStatus === "Available" ? "success" : workspaceStatus.profilesStatus === "Error" ? "error" : "default"} variant="outlined" />
+              </Stack>
+            </Stack>
+          </Paper>
           <Box sx={{ display: activePage === "Optimization" ? "block" : "none" }}>
             <Suspense fallback={<LoadingContent />}>
               <OptimizationPage
@@ -2346,6 +2687,16 @@ export default function App() {
                 onReviewDispatchStrategy={() => handleNavigate("Dispatch")}
                 runState={singleOptimizationRunState}
                 setRunState={setSingleOptimizationRunState}
+                selectedMode={selectedMode}
+                selectedBatteryId={selectedBatteryId}
+                batteryConfiguration={batteryConfiguration}
+                setupConfiguration={setupConfiguration}
+                activeStep={activeOptimizationStep}
+                operationalProfileDate={operationalProfileDate}
+                onOperationalProfileDateChange={setOperationalProfileDate}
+                comparisonAhp={comparisonAhp}
+                onOpenComparisonMode={() => handleNavigate("Comparison Mode")}
+                onStateChange={handleOptimizationStateChange}
               />
             </Suspense>
           </Box>
@@ -2358,9 +2709,24 @@ export default function App() {
               persistedStrategy={workspaceDispatchStrategy}
               onStrategyChange={setWorkspaceDispatchStrategy}
             />
-          ) : activePage === "Comparison Mode" ? (
-            <ComparisonModePage />
           ) : null}
+          <Box sx={{ display: activePage === "Comparison Mode" ? "block" : "none" }}>
+            <ComparisonModePage
+              dataset={uploadedDataset}
+              dispatchStrategy={workspaceDispatchStrategy}
+              comparisonConfiguration={comparisonConfiguration}
+              comparisonRunState={comparisonRunState}
+              comparisonOptimization={comparisonOptimization}
+              comparisonAhp={comparisonAhp}
+              promethee={promethee}
+              onComparisonConfigurationChange={setComparisonConfiguration}
+              onComparisonRunStateChange={setComparisonRunState}
+              onComparisonCompleted={setComparisonOptimization}
+              onInvalidateScientificState={invalidateComparisonScience}
+              onOpenAHP={openComparisonAHP}
+              onPrometheeChange={setPromethee}
+            />
+          </Box>
         </Box>
       </Box>
     </Box>

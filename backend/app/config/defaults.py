@@ -39,11 +39,11 @@ DEFAULT_BATTERY_TYPES: list[dict[str, str | int | float]] = [
 
 
 DEFAULT_CRITERIA: list[dict[str, str]] = [
-    {"name": "total_annual_cost_Rs", "direction": "minimize"},
+    {"name": "total_annual_cost_rs", "direction": "minimize"},
     {"name": "cycle_based_life_years", "direction": "maximize"},
     {"name": "round_trip_efficiency", "direction": "maximize"},
     {"name": "weight_density_kg_per_kwh", "direction": "minimize"},
-    {"name": "bess_om_cost_annual_Rs", "direction": "minimize"},
+    {"name": "annual_om_cost_rs", "direction": "minimize"},
     {"name": "warranty_years", "direction": "maximize"},
 ]
 

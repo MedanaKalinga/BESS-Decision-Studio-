@@ -2,12 +2,26 @@ import unittest
 
 from app.api.configuration import get_default_configuration
 from app.config.defaults import (
+    DEFAULT_CRITERIA,
     DEFAULT_DISPATCH_PERIODS,
     PV_NOT_DISPATCHED_WARNING,
 )
 
 
 class TestDefaultConfiguration(unittest.TestCase):
+    def test_criteria_use_comparison_mode_contract_order(self) -> None:
+        self.assertEqual(
+            DEFAULT_CRITERIA,
+            [
+                {"name": "total_annual_cost_rs", "direction": "minimize"},
+                {"name": "cycle_based_life_years", "direction": "maximize"},
+                {"name": "round_trip_efficiency", "direction": "maximize"},
+                {"name": "weight_density_kg_per_kwh", "direction": "minimize"},
+                {"name": "annual_om_cost_rs", "direction": "minimize"},
+                {"name": "warranty_years", "direction": "maximize"},
+            ],
+        )
+
     def test_configuration_endpoint_includes_dispatch_periods(self) -> None:
         configuration = get_default_configuration()
 

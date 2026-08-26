@@ -3,6 +3,7 @@ export type ApplicationRoute =
   | { kind: "login" }
   | { kind: "register" }
   | { kind: "projects" }
+  | { kind: "documentation" }
   | {
       kind: "project";
       projectId: string;
@@ -25,6 +26,9 @@ export function parseApplicationRoute(pathname: string): ApplicationRoute {
   if (pathname === "/login") return { kind: "login" };
   if (pathname === "/register") return { kind: "register" };
   if (pathname === "/projects") return { kind: "projects" };
+  if (pathname === "/documentation" || pathname === "/documentation/") {
+    return { kind: "documentation" };
+  }
   const projectMatch = /^\/projects\/([^/]+)(?:(?:\/(dataset|dispatch|results))|(?:\/optimization(?:\/(single\/configuration|single\/setup|single\/run|comparison|comparison\/ahp|comparison\/recommendation|comparison\/results))?))?\/?$/.exec(pathname);
   if (projectMatch) {
     const workspaceSurface = projectMatch[2];

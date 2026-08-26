@@ -159,6 +159,7 @@ const ComparisonRecommendationPage = lazy(() => import("./pages/ComparisonRecomm
 const ComparisonResultsPage = lazy(() => import("./pages/ComparisonResultsPage"));
 const ComparisonOptimizationPage = lazy(() => import("./pages/ComparisonOptimizationPage"));
 const ProjectResultsPage = lazy(() => import("./pages/ProjectResultsPage"));
+const DocumentationPage = lazy(() => import("./pages/DocumentationPage"));
 
 const INITIAL_WORKSPACE_DISPATCH_STRATEGY: WorkspaceDispatchStrategy = {
   status: "Reference Strategy",
@@ -248,7 +249,7 @@ type CriterionName =
   | "round_trip_efficiency"
   | "weight_density_kg_per_kwh"
   | "warranty_years";
-type ActivePage = "My Projects" | "Dashboard" | "Comparison Mode" | "Results" | "Dispatch" | "Data Upload" | "Optimization";
+type ActivePage = "My Projects" | "Dashboard" | "Comparison Mode" | "Results" | "Dispatch" | "Data Upload" | "Optimization" | "Documentation";
 type DispatchPeriodName = "Off-peak 1" | "Day" | "Peak" | "Off-peak 2";
 type EVSupplySource = "PV" | "BESS" | "Grid";
 type BackendExcessPvPriority = "BESS" | "Export";
@@ -318,7 +319,7 @@ const navigationItems: NavigationItem[] = [
   { label: "Optimization", icon: AutoGraphRoundedIcon, page: "Optimization" },
   { label: "Decision", icon: ScaleRoundedIcon, page: "Comparison Mode" },
   { label: "Results", icon: AssessmentRoundedIcon, page: "Results" },
-  { label: "Documentation", icon: DescriptionRoundedIcon },
+  { label: "Documentation", icon: DescriptionRoundedIcon, page: "Documentation" },
 ];
 
 const criterionLabels: Record<CriterionName, string> = {
@@ -667,7 +668,11 @@ function SidebarContent({
           {navigationItems.map((item) => {
             const Icon = item.icon;
             const selected = isShellNavigationActive(activePage, item.page);
-            const disabled = !item.page || (!hasActiveProject && item.page !== "My Projects");
+            const disabled = !item.page || (
+              !hasActiveProject
+              && item.page !== "My Projects"
+              && item.page !== "Documentation"
+            );
 
             return (
               <ListItemButton
@@ -2611,7 +2616,13 @@ export default function App() {
         setProjectsError("Project was not found or is not available.");
         navigate("/projects", { replace: true });
       }
-      setActivePage(requestedRoute.kind === "projects" || !selected ? "My Projects" : "Dashboard");
+      setActivePage(
+        requestedRoute.kind === "documentation"
+          ? "Documentation"
+          : requestedRoute.kind === "projects" || !selected
+            ? "My Projects"
+            : "Dashboard",
+      );
       if (!selected) setWorkspaceReady(true);
     } catch (error) {
       setProjects([]);
@@ -2660,6 +2671,11 @@ export default function App() {
     }
     if (applicationRoute.kind === "projects") {
       setActivePage("My Projects");
+      setOpeningProjectId(null);
+      return;
+    }
+    if (applicationRoute.kind === "documentation") {
+      setActivePage("Documentation");
       setOpeningProjectId(null);
       return;
     }
@@ -2875,6 +2891,8 @@ export default function App() {
         } else {
           setActivePage("Dashboard");
         }
+      } else if (restoredRoute.kind === "documentation") {
+        setActivePage("Documentation");
       } else {
         setActivePage("My Projects");
       }
@@ -3016,6 +3034,11 @@ export default function App() {
   const handleNavigate = (page: ActivePage) => {
     if (page === "My Projects") {
       navigate("/projects");
+      setMobileOpen(false);
+      return;
+    }
+    if (page === "Documentation") {
+      navigate("/documentation");
       setMobileOpen(false);
       return;
     }
@@ -3529,6 +3552,8 @@ export default function App() {
                 <DashboardRoundedIcon />
               ) : activePage === "Results" ? (
                 <AssessmentRoundedIcon />
+              ) : activePage === "Documentation" ? (
+                <DescriptionRoundedIcon />
               ) : (
                 <ScaleRoundedIcon />
               )
@@ -3546,6 +3571,8 @@ export default function App() {
                       ? "Workspace overview"
                     : activePage === "Results"
                       ? "Final decision"
+                    : activePage === "Documentation"
+                      ? "External user guide"
                     : "Reference setup"
             }
             size="small"
@@ -3674,6 +3701,11 @@ export default function App() {
                 onAction={handleDashboardAction}
                 onViewRun={handleDashboardViewRun}
               />
+            </Suspense>
+          ) : null}
+          {activePage === "Documentation" ? (
+            <Suspense fallback={<LoadingContent />}>
+              <DocumentationPage />
             </Suspense>
           ) : null}
           {activeProject ? <Box sx={{ display: activePage === "Optimization" ? "block" : "none" }}>

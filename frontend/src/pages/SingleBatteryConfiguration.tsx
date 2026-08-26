@@ -25,6 +25,7 @@ import {
 import type { SvgIconComponent } from "@mui/icons-material";
 
 import type { SingleBatteryConfigurationSnapshot } from "../types/workspace";
+import { batteryTypeLabel } from "../lib/batteryCatalogue";
 
 
 const CONFIG_DEFAULTS_ENDPOINT = "/api/config/defaults";
@@ -484,7 +485,7 @@ export default function SingleBatteryConfiguration({
                 SINGLE BATTERY CONFIGURATION
               </Typography>
               <Typography variant="h3" sx={{ mt: 0.35, fontSize: { xs: 30, sm: 39 }, fontWeight: 850, letterSpacing: "-0.035em" }}>
-                Configure {effectiveName}
+                Configure {batteryTypeLabel(effectiveName)}
               </Typography>
               <Typography sx={{ mt: 1, color: "rgba(255,255,255,0.8)", lineHeight: 1.65 }}>
                 Select and edit one battery alternative.
@@ -627,7 +628,7 @@ export default function SingleBatteryConfiguration({
         >
           <Box sx={{ p: 2.5, borderBottom: "1px solid rgba(255,255,255,0.09)", background: "linear-gradient(135deg, rgba(20,184,166,0.18), rgba(37,99,235,0.14))" }}>
             <Typography variant="overline" sx={{ color: "#5eead4", fontWeight: 850, letterSpacing: "0.11em" }}>CONFIGURATION SUMMARY</Typography>
-            <Typography variant="h5" sx={{ mt: 0.35, fontWeight: 850 }}>{effectiveName}</Typography>
+            <Typography variant="h5" sx={{ mt: 0.35, fontWeight: 850 }}>{batteryTypeLabel(effectiveName)}</Typography>
             <Typography variant="caption" sx={{ color: "#94a3b8" }}>Based on {catalogueBattery.name} catalogue type</Typography>
             <Chip
               size="small"

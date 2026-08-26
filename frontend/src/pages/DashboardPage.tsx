@@ -29,6 +29,7 @@ import type {
   DashboardStatusCard,
 } from "../lib/dashboardState";
 import { designTokens } from "../theme";
+import { batteryTypeLabel } from "../lib/batteryCatalogue";
 
 interface DashboardPageProps {
   projectName: string;
@@ -252,7 +253,7 @@ export default function DashboardPage({ projectName, displayName, model, onActio
         >
           {model.single.capacityKwh !== null ? (
             <>
-              <KeyValue label="Battery" value={model.single.batteryName} />
+              <KeyValue label="Battery" value={model.single.batteryName ? batteryTypeLabel(model.single.batteryName) : null} />
               <KeyValue label="Capacity" value={`${numberFormatter.format(model.single.capacityKwh)} kWh`} />
               <KeyValue
                 label="Annual cost"
@@ -338,7 +339,7 @@ export default function DashboardPage({ projectName, displayName, model, onActio
               </Stack>
               <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
                 {model.activeJob.mode}
-                {model.activeJob.currentBattery ? ` · ${model.activeJob.currentBattery}` : ""}
+                {model.activeJob.currentBattery ? ` · ${batteryTypeLabel(model.activeJob.currentBattery)}` : ""}
               </Typography>
               {model.activeJob.blockedReason ? (
                 <Alert severity="warning" sx={{ mt: 1.5 }}>{model.activeJob.blockedReason}</Alert>
@@ -394,7 +395,7 @@ export default function DashboardPage({ projectName, displayName, model, onActio
               <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ justifyContent: "space-between" }}>
                 <Box>
                   <Typography variant="h4" color="primary.main" sx={{ fontWeight: 950 }}>
-                    {model.recommendation.batteryName}
+                    {batteryTypeLabel(model.recommendation.batteryName)}
                   </Typography>
                   <Typography variant="body2" color="text.secondary" sx={{ mt: 0.4 }}>
                     Recommended from the GA-optimized feasible alternatives.
@@ -481,7 +482,7 @@ export default function DashboardPage({ projectName, displayName, model, onActio
               {model.capacityOverview.map((item) => (
                 <Box key={item.batteryName}>
                   <Stack direction="row" spacing={1} sx={{ justifyContent: "space-between" }}>
-                    <Typography variant="body2" noWrap sx={{ fontWeight: 800 }}>{item.batteryName}</Typography>
+                    <Typography variant="body2" noWrap sx={{ fontWeight: 800 }}>{batteryTypeLabel(item.batteryName)}</Typography>
                     <Typography variant="caption" color="text.secondary">
                       {numberFormatter.format(item.capacityKwh)} kWh
                     </Typography>

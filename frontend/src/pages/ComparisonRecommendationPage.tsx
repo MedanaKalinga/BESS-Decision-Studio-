@@ -26,7 +26,7 @@ import {
   findRecommendedStageOneResult,
   isPrometheeResultStale,
 } from "../lib/comparisonResults";
-import { batteryDisplayName } from "../lib/batteryCatalogue";
+import { batteryTypeLabel as batteryDisplayName } from "../lib/batteryCatalogue";
 import type {
   ComparisonAHPWorkspaceState,
   ComparisonOptimizationWorkspaceState,

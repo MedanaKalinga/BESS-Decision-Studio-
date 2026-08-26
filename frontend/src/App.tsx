@@ -93,6 +93,7 @@ import {
   destinationForComparisonDecisionStage,
 } from "./lib/comparisonDecisionWorkflow";
 import { buildDashboardModel } from "./lib/dashboardState";
+import { batteryTypeLabel } from "./lib/batteryCatalogue";
 import type { DashboardQuickAction } from "./lib/dashboardState";
 import {
   buildRemoteWorkspaceState,
@@ -875,7 +876,7 @@ function BatteryCard({ battery, index }: { battery: BatteryType; index: number }
             type="button"
             size="small"
             startIcon={<EditRoundedIcon />}
-            aria-label={`Edit ${battery.name} battery settings`}
+            aria-label={`Edit ${batteryTypeLabel(battery.name)} battery settings`}
             sx={{
               minWidth: 0,
               px: 1.35,
@@ -918,7 +919,7 @@ function BatteryCard({ battery, index }: { battery: BatteryType; index: number }
               BATTERY TECHNOLOGY
             </Typography>
             <Typography variant="h6" sx={{ mt: 0.15, fontSize: { xs: 20, sm: 22 } }}>
-              {battery.name}
+              {batteryTypeLabel(battery.name)}
             </Typography>
           </Box>
         </Stack>

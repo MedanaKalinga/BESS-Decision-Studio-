@@ -4,6 +4,7 @@ import test from "node:test";
 
 import {
   batteryDisplayName,
+  batteryTypeLabel,
   currentBatterySelectionId,
 } from "../src/lib/batteryCatalogue.ts";
 import {
@@ -26,6 +27,14 @@ test("current battery label is High while historical Medium-high renders compati
   assert.doesNotMatch(optimizationSource, /name: "Medium-high"/);
   assert.equal(batteryDisplayName("Medium-high"), "High");
   assert.equal(currentBatterySelectionId("medium-high"), "high");
+});
+
+test("battery catalogue names use presentation-only type labels", () => {
+  assert.equal(batteryTypeLabel("Low-cost"), "Type 1");
+  assert.equal(batteryTypeLabel("Medium-low"), "Type 2");
+  assert.equal(batteryTypeLabel("Medium"), "Type 3");
+  assert.equal(batteryTypeLabel("High"), "Type 4");
+  assert.equal(batteryTypeLabel("Medium-high"), "Type 4");
 });
 
 test("five-criterion editor exposes ten upper-triangle judgments", () => {

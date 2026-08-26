@@ -43,6 +43,7 @@ import type {
   WorkspaceDatasetSummary,
   WorkspaceDispatchStrategy,
 } from "../types/workspace";
+import { batteryTypeLabel } from "../lib/batteryCatalogue";
 
 interface SingleOptimizationSetupProps {
   battery: SingleBatteryConfigurationSnapshot;
@@ -440,7 +441,7 @@ export default function SingleOptimizationSetup({
                 Prepare the optimization run
               </Typography>
               <Typography sx={{ mt: 1, color: "rgba(255,255,255,0.79)", lineHeight: 1.65 }}>
-                Set inputs, bounds, and assumptions for {battery.batteryName}.
+                Set inputs, bounds, and assumptions for {batteryTypeLabel(battery.batteryName)}.
               </Typography>
             </Box>
             <Chip icon={<ScienceRoundedIcon />} label="Setup only · React state" sx={{ color: "#fff", bgcolor: "rgba(255,255,255,0.13)", fontWeight: 780, "& .MuiChip-icon": { color: "#99f6e4" } }} />
@@ -610,7 +611,7 @@ export default function SingleOptimizationSetup({
             <Typography variant="caption" sx={{ color: "#94a3b8" }}>Review before running.</Typography>
           </Box>
           <Stack spacing={1.2} sx={{ p: 2.5 }}>
-            <SummaryRow label="Selected battery" value={battery.batteryName} />
+            <SummaryRow label="Selected battery" value={batteryTypeLabel(battery.batteryName)} />
             <SummaryRow label="Edited battery price" value={`LKR ${integerFormatter.format(battery.priceRsPerKwh)} / kWh`} />
             <SummaryRow label="Dataset" value={dataset?.filename ?? "Not selected"} />
             <SummaryRow label="Dispatch" value={dispatchStrategy.status} />

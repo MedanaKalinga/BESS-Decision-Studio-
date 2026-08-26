@@ -1,4 +1,5 @@
 import { canEnterComparisonResults, isPrometheeResultStale } from "./comparisonResults.ts";
+import { batteryTypeLabel } from "./batteryCatalogue.ts";
 import {
   decisionStageActionLabel,
   deriveComparisonDecisionStage,
@@ -316,7 +317,7 @@ export function buildDashboardModel(input: DashboardWorkspaceInput): DashboardMo
       mode: "Single",
       completedAt: new Date(input.singleRun.finishedAt).toISOString(),
       status: singleResult.solution_status,
-      summary: `${singleResult.battery_name} · ${singleResult.best_bess_capacity_kwh.toLocaleString()} kWh`,
+      summary: `${batteryTypeLabel(singleResult.battery_name)} · ${singleResult.best_bess_capacity_kwh.toLocaleString()} kWh`,
     });
   }
   if (comparisonResult && input.comparison?.completedAt) {

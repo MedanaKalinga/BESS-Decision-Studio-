@@ -29,7 +29,7 @@ import {
   comparisonDisabledReason,
   type SingleOptimizationStep,
 } from "../lib/optimizationWorkflow";
-import { currentBatterySelectionId } from "../lib/batteryCatalogue";
+import { batteryTypeLabel, currentBatterySelectionId } from "../lib/batteryCatalogue";
 import type {
   ComparisonRunPhase,
   SingleBatteryConfigurationSnapshot,
@@ -428,7 +428,7 @@ function BatterySelector({
               </Box>
               <Box sx={{ minWidth: 0 }}>
                 <Typography variant="subtitle2" sx={{ color: "#183946", fontWeight: 820 }}>
-                  {battery.name}
+                  {batteryTypeLabel(battery.name)}
                 </Typography>
                 <Typography variant="caption" color="text.secondary">
                   {battery.descriptor}
@@ -805,7 +805,7 @@ export default function OptimizationPage({
           </Typography>
           <Typography variant="body2">
             {selectedMode === "single"
-              ? `${selectedBatteryName} is selected for single-battery optimization.`
+              ? `${batteryTypeLabel(selectedBatteryName ?? "Battery")} is selected for single-battery optimization.`
               : comparisonAhp?.accepted
                 ? "AHP weights ready. The accepted judgments are saved in this browser workspace."
                 : "Battery Comparison is selected for the future multi-battery workflow."} The GA has not been started.

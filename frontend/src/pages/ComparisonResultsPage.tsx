@@ -23,7 +23,7 @@ import {
 } from "@mui/material";
 
 import { AHP_CRITERIA } from "../lib/comparisonAhp";
-import { batteryDisplayName } from "../lib/batteryCatalogue";
+import { batteryTypeLabel as batteryDisplayName } from "../lib/batteryCatalogue";
 import {
   comparisonRankingEligibility,
   findRecommendedStageOneResult,
@@ -252,7 +252,7 @@ export default function ComparisonResultsPage({
                   : comparison.finalResult.battery_results
                 ).map((battery) => (
                   <Stack key={battery.battery_name} direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ justifyContent: "space-between" }}>
-                    <Typography variant="body2" sx={{ fontWeight: 780 }}>{battery.battery_name}</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 780 }}>{batteryDisplayName(battery.battery_name)}</Typography>
                     <Typography variant="body2" color="text.secondary">
                       {number.format(battery.best_bess_capacity_kwh)} kWh · {battery.is_feasible ? "Feasible" : `Failed: ${battery.failed_constraints.join(", ")}`}
                     </Typography>

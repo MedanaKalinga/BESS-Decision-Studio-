@@ -17,6 +17,7 @@ import {
   Typography,
 } from "@mui/material";
 import { PageHeader } from "../components/ui";
+import { batteryTypeLabel } from "../lib/batteryCatalogue";
 import {
   decisionStageActionLabel,
   deriveComparisonDecisionStage,
@@ -139,14 +140,14 @@ export default function ProjectResultsPage({
             const selected = run.run_id === (selectedRun?.run_id ?? effectiveRuns[0]?.run_id);
             return <Paper key={run.run_id} component="button" type="button" onClick={() => setSelectedRunId(run.run_id)} variant="outlined" sx={{ width: "100%", p: 1.7, textAlign: "left", color: "inherit", cursor: "pointer", borderRadius: "17px", borderColor: selected ? "primary.main" : "divider", bgcolor: selected ? "rgba(155,239,74,.06)" : "#0D1D2D", font: "inherit" }}>
               <Stack direction="row" spacing={1} sx={{ justifyContent: "space-between", alignItems: "center" }}><Typography sx={{ fontWeight: 850 }}>Run {effectiveRuns.length - index}</Typography><Chip size="small" label={run.lifecycle_status} color={run.lifecycle_status === "completed" ? "success" : run.lifecycle_status === "failed" ? "error" : "default"} /></Stack>
-              <Typography variant="body2" sx={{ mt: .55 }}>{result?.battery_name ?? "Result unavailable"}</Typography>
+              <Typography variant="body2" sx={{ mt: .55 }}>{result ? batteryTypeLabel(result.battery_name) : "Result unavailable"}</Typography>
               <Typography variant="caption" color="text.secondary">{formatRunTimestamp(run.completed_at ?? run.updated_at)}</Typography>
             </Paper>;
           })}
         </Stack>
         <Paper variant="outlined" sx={{ p: { xs: 2, sm: 2.5 }, borderRadius: "22px", borderColor: "divider", bgcolor: "#0D1D2D" }}>
           {selectedResult ? <>
-            <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ justifyContent: "space-between", alignItems: { sm: "center" } }}><Box><Typography variant="overline" color="primary.main" sx={{ fontWeight: 850 }}>SINGLE GA RESULT</Typography><Typography variant="h5" sx={{ fontWeight: 900 }}>{selectedResult.battery_name}</Typography></Box><Chip label={selectedResult.is_feasible ? "Feasible" : "Infeasible"} color={selectedResult.is_feasible ? "success" : "warning"} /></Stack>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ justifyContent: "space-between", alignItems: { sm: "center" } }}><Box><Typography variant="overline" color="primary.main" sx={{ fontWeight: 850 }}>SINGLE GA RESULT</Typography><Typography variant="h5" sx={{ fontWeight: 900 }}>{batteryTypeLabel(selectedResult.battery_name)}</Typography></Box><Chip label={selectedResult.is_feasible ? "Feasible" : "Infeasible"} color={selectedResult.is_feasible ? "success" : "warning"} /></Stack>
             <Box sx={{ mt: 2, display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2,minmax(0,1fr))" }, gap: 1.2 }}>
               <ResultMetric label="Optimized capacity" value={`${number.format(selectedResult.best_bess_capacity_kwh)} kWh`} />
               <ResultMetric label="Peak support" value={`${number.format(selectedResult.best_peak_support_pct)}%`} />
@@ -163,7 +164,7 @@ export default function ProjectResultsPage({
     {tab === 1 ? <Paper variant="outlined" sx={{ p: { xs: 2.2, sm: 3 }, borderRadius: "24px", borderColor: "divider", bgcolor: "#0D1D2D" }}>
       {decisionCurrent && winner ? <>
         <Typography variant="overline" color="primary.main" sx={{ fontWeight: 850 }}>CURRENT FINAL DECISION</Typography>
-        <Typography variant="h4" sx={{ mt: .4, fontWeight: 900 }}>{winner.battery_name}</Typography>
+        <Typography variant="h4" sx={{ mt: .4, fontWeight: 900 }}>{batteryTypeLabel(winner.battery_name)}</Typography>
         <Typography color="text.secondary" sx={{ mt: .5 }}>Recommended from the GA-optimized feasible alternatives.</Typography>
         <Box sx={{ mt: 2, display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(3,minmax(0,1fr))" }, gap: 1.2 }}><ResultMetric label="Optimized capacity" value={`${number.format(winner.best_bess_capacity_kwh)} kWh`} /><ResultMetric label="Peak support" value={`${number.format(winner.best_peak_support_pct)}%`} /><ResultMetric label="Net flow" value={number.format(promethee?.result.ordered_ranking[0]?.net_flow ?? 0)} /></Box>
         <Button sx={{ mt: 2 }} variant="contained" endIcon={<ArrowForwardRoundedIcon />} onClick={onOpenDetailedDecision}>Open Detailed Decision Results</Button>

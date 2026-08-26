@@ -27,6 +27,7 @@ import type {
   SingleOptimizationOperationalProfile,
   WorkspaceDatasetSummary,
 } from "../types/workspace";
+import { batteryTypeLabel } from "../lib/batteryCatalogue";
 
 const numberFormatter = new Intl.NumberFormat("en-LK", { maximumFractionDigits: 2 });
 
@@ -234,7 +235,7 @@ export default function OperationalProfiles({ projectId, jobId, dataset, result,
   return (
     <Paper component="section" aria-labelledby="operational-profiles-title" elevation={0} sx={{ mt: 0.5, overflow: "hidden", borderRadius: "28px", border: "1px solid", borderColor: "divider", bgcolor: "#0D1D2D", boxShadow: "0 22px 55px rgba(0,0,0,0.22)" }}>
       <Box sx={{ p: { xs: 2.3, sm: 3 }, color: "#fff", background: "linear-gradient(115deg, #0b4f59, #0f766e 56%, #2563eb 130%)" }}>
-        <Stack direction={{ xs: "column", md: "row" }} spacing={2} sx={{ justifyContent: "space-between", alignItems: { md: "center" } }}><Box><Stack direction="row" spacing={1} sx={{ alignItems: "center" }}><WaterfallChartRoundedIcon /><Typography variant="overline" sx={{ color: "#a7f3d0", fontWeight: 850, letterSpacing: "0.1em" }}>SIMULATED OPERATIONS</Typography></Stack><Typography id="operational-profiles-title" variant="h4" sx={{ mt: 0.5, fontWeight: 900 }}>Operational Profiles</Typography><Typography sx={{ mt: 0.7, color: "rgba(255,255,255,0.79)" }}>Winning {result.battery_name} dispatch at 15-minute resolution.</Typography></Box><Chip label={`${numberFormatter.format(result.best_bess_capacity_kwh)} kWh · ${numberFormatter.format(result.best_peak_support_pct)}% peak support`} sx={{ color: "#fff", bgcolor: "rgba(255,255,255,0.14)", fontWeight: 820 }} /></Stack>
+        <Stack direction={{ xs: "column", md: "row" }} spacing={2} sx={{ justifyContent: "space-between", alignItems: { md: "center" } }}><Box><Stack direction="row" spacing={1} sx={{ alignItems: "center" }}><WaterfallChartRoundedIcon /><Typography variant="overline" sx={{ color: "#a7f3d0", fontWeight: 850, letterSpacing: "0.1em" }}>SIMULATED OPERATIONS</Typography></Stack><Typography id="operational-profiles-title" variant="h4" sx={{ mt: 0.5, fontWeight: 900 }}>Operational Profiles</Typography><Typography sx={{ mt: 0.7, color: "rgba(255,255,255,0.79)" }}>Winning {batteryTypeLabel(result.battery_name)} dispatch at 15-minute resolution.</Typography></Box><Chip label={`${numberFormatter.format(result.best_bess_capacity_kwh)} kWh · ${numberFormatter.format(result.best_peak_support_pct)}% peak support`} sx={{ color: "#fff", bgcolor: "rgba(255,255,255,0.14)", fontWeight: 820 }} /></Stack>
       </Box>
       <Box sx={{ p: { xs: 2.1, sm: 2.8 } }}>
         <Stack direction={{ xs: "column", sm: "row" }} spacing={1.4} sx={{ justifyContent: "space-between", alignItems: { sm: "center" } }}><Box><Typography variant="h6" sx={{ fontWeight: 870 }}>Select an operating day</Typography><Typography variant="body2" color="text.secondary">Available from {dataset.startDate} through {dataset.endDate}.</Typography></Box><TextField type="date" label="Profile date" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: dataset.startDate, max: dataset.endDate } }} sx={{ minWidth: { sm: 220 }, "& .MuiOutlinedInput-root": { borderRadius: "13px" } }} /></Stack>

@@ -89,6 +89,55 @@ class OptimizationJobStore:
             self._jobs[job_id] = record
         return job_id
 
+    def restore(
+        self,
+        *,
+        job_id: str,
+        request_snapshot: object,
+        total_generations: int,
+        estimated_total_evaluations: int,
+        current_generation: int = 0,
+        evaluations_completed: int = 0,
+        current_best_result: object | None = None,
+        status: JobStatus = "queued",
+        error: str | None = None,
+    ) -> None:
+        """Recreate public state from a validated persisted checkpoint."""
+
+        if status not in {"queued", "failed", "cancelled"}:
+            raise ValueError("A restored job must be queued or terminal.")
+        record = _JobRecord(
+            job_id=job_id,
+            request_snapshot=deepcopy(request_snapshot),
+            total_generations=total_generations,
+            estimated_total_evaluations=estimated_total_evaluations,
+            status=status,
+            current_generation=current_generation,
+            evaluations_completed=evaluations_completed,
+            progress_percent=min(
+                100.0,
+                100.0 * evaluations_completed / estimated_total_evaluations,
+            ),
+            error=error,
+        )
+        if isinstance(current_best_result, dict):
+            record.current_best_capacity_kwh = self._optional_finite(
+                current_best_result.get("bess_capacity_kwh"), "bess_capacity_kwh"
+            )
+            record.current_best_peak_support_pct = self._optional_finite(
+                current_best_result.get("peak_support_pct"), "peak_support_pct"
+            )
+            record.current_best_total_annual_cost_rs = self._optional_finite(
+                current_best_result.get("total_annual_cost_rs"), "total_annual_cost_rs"
+            )
+            record.current_best_fitness_rs = self._optional_finite(
+                current_best_result.get("fitness_rs"), "fitness_rs"
+            )
+            feasible = current_best_result.get("is_feasible")
+            record.current_best_is_feasible = feasible if isinstance(feasible, bool) else None
+        with self._lock:
+            self._jobs[job_id] = record
+
     def claim(self, job_id: str) -> bool:
         """Atomically move a queued job to running.
 

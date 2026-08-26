@@ -35,6 +35,7 @@ import {
   isValidAHPMatrix,
   resetAHPMatrix,
   sanitizeComparisonAHPState,
+  SCIENTIFIC_CONFIGURATION_VERSION,
   updatePairwiseJudgment,
 } from "../lib/comparisonAhp";
 import type {
@@ -43,7 +44,7 @@ import type {
 } from "../types/workspace";
 
 const AHP_ENDPOINT = "/api/ahp/calculate";
-const REQUEST_TIMEOUT_MS = 8_000;
+const REQUEST_TIMEOUT_MS = 20_000;
 const DEBOUNCE_MS = 350;
 
 interface BackendAHPResponse {
@@ -128,16 +129,20 @@ export default function ComparisonAHPConfiguration({
     [workspaceState],
   );
   const [matrix, setMatrix] = useState<number[][]>(() =>
-    restored ? cloneMatrix(restored.matrix) : resetAHPMatrix(),
+    restored && !restored.incompatible ? cloneMatrix(restored.matrix) : resetAHPMatrix(),
   );
   const [calculation, setCalculation] = useState<AHPCalculationResult | null>(
-    restored?.calculation ?? null,
+    restored?.incompatible ? null : restored?.calculation ?? null,
   );
-  const [accepted, setAccepted] = useState(restored?.accepted ?? false);
+  const [accepted, setAccepted] = useState(restored?.incompatible ? false : restored?.accepted ?? false);
   const [revision, setRevision] = useState(restored?.revision ?? 0);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const skipInitialCalculation = useRef(Boolean(restored?.calculation));
+  const calculatedInputKey = useRef(
+    restored?.calculation && !restored.incompatible
+      ? `${restored.revision}:${JSON.stringify(restored.matrix)}`
+      : null,
+  );
   const activeRequest = useRef<AbortController | null>(null);
   const requestSequence = useRef(0);
   const stateChangeRef = useRef(onWorkspaceStateChange);
@@ -163,7 +168,11 @@ export default function ComparisonAHPConfiguration({
     activeRequest.current = controller;
     const sequence = requestSequence.current + 1;
     requestSequence.current = sequence;
-    const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    let timedOut = false;
+    const timeout = window.setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, REQUEST_TIMEOUT_MS);
     setPending(true);
     setError(null);
 
@@ -184,6 +193,7 @@ export default function ComparisonAHPConfiguration({
       const result = convertResponse(payload);
       if (!result) throw new Error("The backend returned an invalid AHP response.");
       if (sequence !== requestSequence.current) return;
+      calculatedInputKey.current = `${revisionSnapshot}:${JSON.stringify(matrixSnapshot)}`;
 
       const nextAccepted = preserveAccepted && result.status === "ACCEPTABLE";
       const nextState: ComparisonAHPWorkspaceState = {
@@ -192,13 +202,19 @@ export default function ComparisonAHPConfiguration({
         accepted: nextAccepted,
         revision: revisionSnapshot,
         calculatedAt: new Date().toISOString(),
+        acceptedAt: nextAccepted ? new Date().toISOString() : null,
+        scientificConfigurationVersion: SCIENTIFIC_CONFIGURATION_VERSION,
       };
       setCalculation(result);
       setAccepted(nextAccepted);
       stateChangeRef.current(nextState);
     } catch (requestError) {
       if (sequence !== requestSequence.current) return;
-      const message = controller.signal.aborted
+      // Leaving the AHP page and React Strict Mode cleanup both abort pending
+      // requests. Neither is a failed calculation and neither may overwrite an
+      // already accepted workspace state.
+      if (controller.signal.aborted && !timedOut) return;
+      const message = timedOut
         ? "The AHP calculation timed out. Your judgments have been preserved."
         : requestError instanceof TypeError
           ? "The AHP backend is unavailable. Your judgments have been preserved."
@@ -214,18 +230,20 @@ export default function ComparisonAHPConfiguration({
         accepted: false,
         revision: revisionSnapshot,
         calculatedAt: null,
+        scientificConfigurationVersion: SCIENTIFIC_CONFIGURATION_VERSION,
       });
     } finally {
       window.clearTimeout(timeout);
-      if (sequence === requestSequence.current) setPending(false);
+      if (sequence === requestSequence.current) {
+        if (activeRequest.current === controller) activeRequest.current = null;
+        setPending(false);
+      }
     }
   }, []);
 
   useEffect(() => {
-    if (skipInitialCalculation.current) {
-      skipInitialCalculation.current = false;
-      return undefined;
-    }
+    const inputKey = `${revision}:${JSON.stringify(matrix)}`;
+    if (calculatedInputKey.current === inputKey) return undefined;
     const timer = window.setTimeout(() => {
       void calculate(cloneMatrix(matrix), revision, false);
     }, DEBOUNCE_MS);
@@ -248,6 +266,7 @@ export default function ComparisonAHPConfiguration({
       accepted: false,
       revision: nextRevision,
       calculatedAt: null,
+      scientificConfigurationVersion: SCIENTIFIC_CONFIGURATION_VERSION,
     });
   }
 
@@ -265,17 +284,21 @@ export default function ComparisonAHPConfiguration({
       accepted: false,
       revision: nextRevision,
       calculatedAt: null,
+      scientificConfigurationVersion: SCIENTIFIC_CONFIGURATION_VERSION,
     });
   }
 
   function continueWorkflow() {
     if (!canContinueWithAHP(calculation, pending, error) || !calculation) return;
+    calculatedInputKey.current = `${revision}:${JSON.stringify(matrix)}`;
     const nextState: ComparisonAHPWorkspaceState = {
       matrix: cloneMatrix(matrix),
       calculation,
       accepted: true,
       revision,
       calculatedAt: new Date().toISOString(),
+      acceptedAt: new Date().toISOString(),
+      scientificConfigurationVersion: SCIENTIFIC_CONFIGURATION_VERSION,
     };
     setAccepted(true);
     stateChangeRef.current(nextState);
@@ -292,27 +315,61 @@ export default function ComparisonAHPConfiguration({
 
   return (
     <Stack spacing={2.5}>
-      <Paper elevation={0} sx={{ p: { xs: 2.5, md: 3.5 }, borderRadius: "28px", color: "#fff", background: "linear-gradient(118deg, #073e49 0%, #08766f 58%, #1669a9 125%)", boxShadow: "0 20px 48px rgba(7,62,73,.2)" }}>
+      <Paper elevation={0} sx={{ p: { xs: 2.5, md: 3.5 }, borderRadius: "28px", border: "1px solid", borderColor: "divider", background: "linear-gradient(118deg,#0D1D2D,#12263A)" }}>
         <Stack direction={{ xs: "column", md: "row" }} spacing={2} sx={{ justifyContent: "space-between", alignItems: { md: "center" } }}>
           <Box sx={{ maxWidth: 780 }}>
             <Typography variant="overline" sx={{ fontWeight: 850, letterSpacing: ".13em", color: "#a7f3d0" }}>Comparison Mode · AHP</Typography>
-            <Typography variant="h4" sx={{ mt: .5, fontSize: { xs: 28, md: 36 } }}>Configure criteria importance</Typography>
+            <Typography component="h1" variant="h4" sx={{ mt: .5, fontSize: { xs: 28, md: 36 } }}>AHP Criteria Weighting</Typography>
             <Typography sx={{ mt: 1.2, color: "rgba(255,255,255,.82)", lineHeight: 1.7 }}>
-              Express 15 unique judgments. Reciprocal values and criterion weights are generated automatically by the verified backend calculation.
+              Set 10 judgments; the backend derives reciprocals, weights, and consistency.
             </Typography>
           </Box>
-          <Chip icon={accepted ? <CheckCircleRoundedIcon /> : <BalanceRoundedIcon />} label={accepted ? "AHP weights ready" : "15 pairwise judgments"} sx={{ bgcolor: "rgba(255,255,255,.14)", color: "#fff", fontWeight: 800, "& .MuiChip-icon": { color: "#a7f3d0" } }} />
+          <Chip icon={accepted ? <CheckCircleRoundedIcon /> : <BalanceRoundedIcon />} label={accepted ? "AHP weights ready" : "10 pairwise judgments"} sx={{ bgcolor: "rgba(255,255,255,.14)", color: "#fff", fontWeight: 800, "& .MuiChip-icon": { color: "#a7f3d0" } }} />
         </Stack>
       </Paper>
 
       {error && <Alert severity="error" sx={{ borderRadius: "18px" }}><strong>Calculation unavailable.</strong> {error}</Alert>}
+      {restored?.incompatible && (
+        <Alert severity="warning" sx={{ borderRadius: "18px" }}>
+          {restored.incompatibilityReason}
+        </Alert>
+      )}
+
+      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2,minmax(0,1fr))", lg: "repeat(4,minmax(0,1fr))" }, gap: 1.25 }}>
+        {[
+          ["Consistency Ratio", calculation ? `${(calculation.consistencyRatio * 100).toFixed(2)}%` : "Pending"],
+          ["Acceptance Status", accepted ? "Accepted" : isConsistent ? "Acceptable" : calculation ? "Review Required" : "Pending"],
+          ["Criteria Count", "5"],
+          ["Current Revision", String(revision)],
+        ].map(([label, value]) => (
+          <Paper key={label} variant="outlined" sx={{ p: 1.75, borderRadius: "18px", bgcolor: "background.paper" }}>
+            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>{label}</Typography>
+            <Typography variant="h6" sx={{ mt: .55, fontWeight: 850 }}>{value}</Typography>
+          </Paper>
+        ))}
+      </Box>
+
+      <Paper elevation={0} sx={{ p: { xs: 2, md: 2.5 }, borderRadius: "22px", border: "1px solid", borderColor: "divider", background: "linear-gradient(120deg,rgba(155,239,74,.05),rgba(76,141,255,.045))" }}>
+        <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} sx={{ alignItems: { sm: "center" }, justifyContent: "space-between" }}>
+          <Box>
+            <Typography variant="h6">Quick Configuration</Typography>
+            <Typography variant="body2" color="text.secondary">Use the validated default judgments and backend-calculated weights.</Typography>
+          </Box>
+          <Button startIcon={<RestartAltRoundedIcon />} variant="outlined" onClick={reset} disabled={pending}>Use Default AHP Judgments</Button>
+        </Stack>
+      </Paper>
+
+      <Box>
+        <Typography variant="h5" sx={{ fontWeight: 850 }}>Customize AHP</Typography>
+        <Typography variant="body2" color="text.secondary">Edit pairwise judgments when needed.</Typography>
+      </Box>
 
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", xl: "minmax(0,1.55fr) minmax(340px,.75fr)" }, gap: 2.5, alignItems: "start" }}>
         <Paper elevation={0} sx={{ p: { xs: 2, md: 2.75 }, borderRadius: "24px", border: "1px solid #dbe7ea" }}>
           <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ justifyContent: "space-between", mb: 2.25 }}>
             <Box>
               <Typography variant="h6">Pairwise judgments</Typography>
-              <Typography variant="body2" color="text.secondary">Select how strongly one criterion should influence the decision relative to another.</Typography>
+              <Typography variant="body2" color="text.secondary">Set each pair's relative importance.</Typography>
             </Box>
             <Chip label={`${PAIRWISE_CONTROLS.length} unique comparisons`} size="small" variant="outlined" />
           </Stack>
@@ -320,9 +377,9 @@ export default function ComparisonAHPConfiguration({
             {PAIRWISE_CONTROLS.map(({ row, column }, index) => {
               const value = matrix[row][column];
               return (
-                <Paper key={`${row}-${column}`} variant="outlined" sx={{ p: 1.75, borderRadius: "18px", borderColor: "#dce8ea", transition: "transform .18s ease, box-shadow .18s ease", "&:hover": { transform: "translateY(-2px)", boxShadow: "0 10px 24px rgba(17,94,89,.08)" } }}>
+                <Paper key={`${row}-${column}`} variant="outlined" sx={{ p: 1.75, borderRadius: "18px", borderColor: "divider", bgcolor: "rgba(255,255,255,.02)", transition: "transform .18s ease, box-shadow .18s ease", "&:hover": { transform: "translateY(-2px)", borderColor: "rgba(155,239,74,.3)" } }}>
                   <Stack direction="row" spacing={1} sx={{ alignItems: "center", mb: 1.4 }}>
-                    <Chip label={String(index + 1).padStart(2, "0")} size="small" sx={{ bgcolor: "#e7f8f4", color: "#0f766e", fontWeight: 850 }} />
+                    <Chip label={String(index + 1).padStart(2, "0")} size="small" sx={{ bgcolor: "rgba(155,239,74,.09)", color: "primary.main", fontWeight: 850 }} />
                     <Typography variant="subtitle2" sx={{ fontWeight: 820 }}>{AHP_CRITERIA[row].label}</Typography>
                     <Typography variant="caption" color="text.secondary">vs</Typography>
                     <Typography variant="subtitle2" sx={{ fontWeight: 820 }}>{AHP_CRITERIA[column].label}</Typography>
@@ -348,9 +405,9 @@ export default function ComparisonAHPConfiguration({
 
         <Stack spacing={2.5} sx={{ position: { xl: "sticky" }, top: { xl: 96 } }}>
           <Paper elevation={0} sx={{ overflow: "hidden", borderRadius: "24px", border: "1px solid #dbe7ea" }}>
-            <Box sx={{ p: 2.25, background: "linear-gradient(120deg,#ecfdf8,#eff6ff)" }}>
+            <Box sx={{ p: 2.25, background: "linear-gradient(120deg,rgba(155,239,74,.05),rgba(76,141,255,.04))" }}>
               <Stack direction="row" spacing={1} sx={{ alignItems: "center", justifyContent: "space-between" }}>
-                <Box><Typography variant="h6">Calculated weights</Typography><Typography variant="caption" color="text.secondary">Backend-derived importance ranking</Typography></Box>
+                <Box><Typography variant="h6">Calculated weights</Typography><Typography variant="caption" color="text.secondary">Backend-calculated ranking</Typography></Box>
                 {pending && <CircularProgress size={24} aria-label="Calculating AHP weights" />}
               </Stack>
             </Box>
@@ -360,9 +417,9 @@ export default function ComparisonAHPConfiguration({
                 <Box key={criterion.id}>
                   <Stack direction="row" sx={{ justifyContent: "space-between", mb: .6 }}>
                     <Typography variant="body2" sx={{ fontWeight: 780 }}>{rank + 1}. {criterion.label}</Typography>
-                    <Typography variant="body2" sx={{ fontWeight: 850, color: "#0f766e" }}>{(criterion.weight * 100).toFixed(2)}%</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 850, color: "primary.main" }}>{(criterion.weight * 100).toFixed(2)}%</Typography>
                   </Stack>
-                  <LinearProgress variant="determinate" value={criterion.weight * 100} aria-label={`${criterion.label} weight ${(criterion.weight * 100).toFixed(2)} percent`} sx={{ height: 8, borderRadius: 8, bgcolor: "#e8eff2", "& .MuiLinearProgress-bar": { borderRadius: 8, background: "linear-gradient(90deg,#0f766e,#2584bd)" } }} />
+                  <LinearProgress variant="determinate" value={criterion.weight * 100} aria-label={`${criterion.label} weight ${(criterion.weight * 100).toFixed(2)} percent`} sx={{ height: 8, borderRadius: 8, bgcolor: "rgba(255,255,255,.07)", "& .MuiLinearProgress-bar": { borderRadius: 8, background: "linear-gradient(90deg,#9BEF4A,#4C8DFF)" } }} />
                 </Box>
               )) : <Typography variant="body2" color="text.secondary">Weights will appear after the backend calculation completes.</Typography>}
             </Stack>
@@ -378,7 +435,7 @@ export default function ComparisonAHPConfiguration({
             </Stack>
             <Box sx={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 1 }}>
               {[ ["λ max", metric(calculation?.lambdaMax)], ["Consistency index", metric(calculation?.consistencyIndex)], ["Random index", metric(calculation?.randomIndex, 2)], ["Consistency ratio", calculation ? `${(calculation.consistencyRatio * 100).toFixed(2)}%` : "—"] ].map(([label, value]) => (
-                <Box key={label} sx={{ p: 1.25, borderRadius: "14px", bgcolor: "#f7fafb" }}><Typography variant="caption" color="text.secondary">{label}</Typography><Typography variant="subtitle2" sx={{ fontWeight: 850 }}>{value}</Typography></Box>
+                <Box key={label} sx={{ p: 1.25, borderRadius: "14px", bgcolor: "rgba(255,255,255,.035)" }}><Typography variant="caption" color="text.secondary">{label}</Typography><Typography variant="subtitle2" sx={{ fontWeight: 850 }}>{value}</Typography></Box>
               ))}
             </Box>
           </Paper>
@@ -388,23 +445,25 @@ export default function ComparisonAHPConfiguration({
       <Accordion disableGutters elevation={0} sx={{ border: "1px solid #dbe7ea", borderRadius: "18px !important", overflow: "hidden", "&::before": { display: "none" } }}>
         <AccordionSummary expandIcon={<ExpandMoreRoundedIcon />}><Typography variant="subtitle2" sx={{ fontWeight: 820 }}>View complete matrix</Typography></AccordionSummary>
         <AccordionDetails sx={{ overflowX: "auto" }}>
-          <Box role="table" aria-label="Complete reciprocal AHP matrix" sx={{ display: "grid", gridTemplateColumns: "minmax(150px,1.5fr) repeat(6,minmax(82px,1fr))", minWidth: 760, gap: "1px", bgcolor: "#dfe8eb", border: "1px solid #dfe8eb" }}>
-            {["Criterion", ...AHP_CRITERIA.map((criterion) => criterion.label)].map((heading) => <Box key={heading} role="columnheader" sx={{ p: 1, bgcolor: "#edf7f6", fontSize: 12, fontWeight: 820 }}>{heading}</Box>)}
+          <Box role="table" aria-label="Complete reciprocal AHP matrix" sx={{ display: "grid", gridTemplateColumns: "minmax(150px,1.5fr) repeat(5,minmax(82px,1fr))", minWidth: 680, gap: "1px", bgcolor: "#20364A", border: "1px solid #20364A" }}>
+            {["Criterion", ...AHP_CRITERIA.map((criterion) => criterion.label)].map((heading) => <Box key={heading} role="columnheader" sx={{ p: 1, bgcolor: "#12263A", fontSize: 12, fontWeight: 820 }}>{heading}</Box>)}
             {matrix.flatMap((rowValues, row) => [
-              <Box key={`label-${row}`} role="rowheader" sx={{ p: 1, bgcolor: "#fff", fontSize: 12, fontWeight: 760 }}>{AHP_CRITERIA[row].label}</Box>,
-              ...rowValues.map((value, column) => <Box key={`${row}-${column}`} role="cell" sx={{ p: 1, bgcolor: "#fff", fontSize: 12 }}>{Number(value.toFixed(4))}</Box>),
+              <Box key={`label-${row}`} role="rowheader" sx={{ p: 1, bgcolor: "#0D1D2D", fontSize: 12, fontWeight: 760 }}>{AHP_CRITERIA[row].label}</Box>,
+              ...rowValues.map((value, column) => <Box key={`${row}-${column}`} role="cell" sx={{ p: 1, bgcolor: "#0D1D2D", fontSize: 12 }}>{Number(value.toFixed(4))}</Box>),
             ])}
           </Box>
         </AccordionDetails>
       </Accordion>
 
-      <Paper elevation={0} sx={{ p: 2, borderRadius: "22px", border: "1px solid #dbe7ea" }}>
+      <Paper elevation={4} sx={{ position: "sticky", bottom: 12, zIndex: 5, p: 2, borderRadius: "22px", border: "1px solid", borderColor: "divider", bgcolor: "rgba(8,21,34,.96)", backdropFilter: "blur(12px)" }}>
         <Stack direction={{ xs: "column", md: "row" }} spacing={1.25} sx={{ alignItems: { md: "center" }, justifyContent: "space-between" }}>
-          <Button startIcon={<ArrowBackRoundedIcon />} onClick={onBack}>Back</Button>
+          <Button startIcon={<ArrowBackRoundedIcon />} onClick={onBack}>Back to Comparison Summary</Button>
           <Stack direction={{ xs: "column", sm: "row" }} spacing={1.1}>
             <Button startIcon={<RestartAltRoundedIcon />} onClick={reset} disabled={pending}>Reset to Default Matrix</Button>
             <Button startIcon={<RefreshRoundedIcon />} variant="outlined" onClick={() => void calculate(cloneMatrix(matrix), revision, accepted)} disabled={pending}>Recalculate</Button>
-            <Button endIcon={<ArrowForwardRoundedIcon />} variant="contained" onClick={continueWorkflow} disabled={!continueEnabled} sx={{ minWidth: 130, background: "linear-gradient(100deg,#0f766e,#1677ad)" }}>Continue</Button>
+            <Button endIcon={<ArrowForwardRoundedIcon />} variant="contained" onClick={continueWorkflow} disabled={!continueEnabled} sx={{ minWidth: 220, background: "linear-gradient(100deg,#0f766e,#1677ad)" }}>
+              {accepted ? "Calculate Final Ranking" : "Accept AHP and Calculate Final Ranking"}
+            </Button>
           </Stack>
         </Stack>
       </Paper>

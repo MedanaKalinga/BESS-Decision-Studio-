@@ -12,6 +12,7 @@ from app.services.dataset_service import (
     get_dataset_day,
     validate_and_store_dataset,
 )
+from app.config.mongodb import PersistenceUnavailableError, mongo_persistence
 
 
 router = APIRouter(prefix="/api/datasets", tags=["datasets"])
@@ -65,6 +66,13 @@ def dataset_day(
     dataset_id: str,
     date: str = Query(pattern=r"^\d{4}-\d{2}-\d{2}$"),
 ) -> dict[str, object]:
+    if mongo_persistence.available:
+        try:
+            repository = mongo_persistence.repository()
+            if repository.datasets.find_one({"dataset_id": dataset_id, "project_id": {"$exists": True}}):
+                raise HTTPException(status_code=404, detail="Dataset was not found.")
+        except PersistenceUnavailableError:
+            pass
     try:
         return get_dataset_day(dataset_id, date)
     except DatasetDateError as exc:

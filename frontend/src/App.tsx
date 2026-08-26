@@ -1,5 +1,6 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, ElementType, SetStateAction } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import AccessTimeRoundedIcon from "@mui/icons-material/AccessTimeRounded";
 import ArrowDownwardRoundedIcon from "@mui/icons-material/ArrowDownwardRounded";
 import ArrowUpwardRoundedIcon from "@mui/icons-material/ArrowUpwardRounded";
@@ -11,11 +12,16 @@ import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
 import CloudUploadRoundedIcon from "@mui/icons-material/CloudUploadRounded";
 import CompareArrowsRoundedIcon from "@mui/icons-material/CompareArrowsRounded";
 import CloseRoundedIcon from "@mui/icons-material/CloseRounded";
+import ChevronLeftRoundedIcon from "@mui/icons-material/ChevronLeftRounded";
+import ChevronRightRoundedIcon from "@mui/icons-material/ChevronRightRounded";
 import DashboardRoundedIcon from "@mui/icons-material/DashboardRounded";
 import DeleteOutlineRoundedIcon from "@mui/icons-material/DeleteOutlineRounded";
+import DescriptionRoundedIcon from "@mui/icons-material/DescriptionRounded";
 import DoNotDisturbOnRoundedIcon from "@mui/icons-material/DoNotDisturbOnRounded";
 import EditRoundedIcon from "@mui/icons-material/EditRounded";
+import FolderRoundedIcon from "@mui/icons-material/FolderRounded";
 import LockRoundedIcon from "@mui/icons-material/LockRounded";
+import LogoutRoundedIcon from "@mui/icons-material/LogoutRounded";
 import MenuRoundedIcon from "@mui/icons-material/MenuRounded";
 import RestoreRoundedIcon from "@mui/icons-material/RestoreRounded";
 import ScaleRoundedIcon from "@mui/icons-material/ScaleRounded";
@@ -34,6 +40,9 @@ import {
   CardContent,
   Chip,
   Divider,
+  Dialog,
+  DialogContent,
+  DialogTitle,
   Drawer,
   FormControl,
   FormControlLabel,
@@ -52,6 +61,8 @@ import {
   TextField,
   Toolbar,
   Typography,
+  useMediaQuery,
+  useTheme,
 } from "@mui/material";
 import type {
   PersistedWorkspaceState,
@@ -68,22 +79,85 @@ import type {
 } from "./types/workspace";
 import {
   buildPersistedWorkspaceState,
-  clearPersistedWorkspaceState,
+  getProjectWorkspaceStorageKey,
   readPersistedWorkspaceState,
   shouldRenderOperationalProfiles,
   validatePersistedWorkspaceState,
   writePersistedWorkspaceState,
 } from "./lib/workspacePersistence";
 import { INITIAL_COMPARISON_RUN_STATE, buildComparisonInputSignature, createDefaultComparisonConfiguration, synchronizeComparisonSnapshot, transitionFromComparisonRunner } from "./lib/comparisonOptimization";
-import { canEnterComparisonResults, isPrometheeResultStale } from "./lib/comparisonResults";
+import { canEnterComparisonResults, isAHPCurrent, isPrometheeResultStale, sanitizePrometheeWorkspaceState } from "./lib/comparisonResults";
+import { linkAHPStateToComparison, sanitizeComparisonAHPState } from "./lib/comparisonAhp";
+import {
+  deriveComparisonDecisionStage,
+  destinationForComparisonDecisionStage,
+} from "./lib/comparisonDecisionWorkflow";
+import { buildDashboardModel } from "./lib/dashboardState";
+import type { DashboardQuickAction } from "./lib/dashboardState";
+import {
+  buildRemoteWorkspaceState,
+  chooseNewerWorkspaceState,
+  isHydratableRemoteState,
+  remoteWorkspaceFingerprint,
+} from "./lib/remoteWorkspacePersistence";
+import type { PersistenceStatus } from "./lib/remoteWorkspacePersistence";
+import { getWorkspaceIdStorageKey } from "./lib/remoteWorkspacePersistence";
+import {
+  archiveProject as archiveOwnedProject,
+  createProject as createOwnedProject,
+  createSignedOutShellState,
+  getProject as fetchOwnedProject,
+  listProjects as fetchOwnedProjects,
+  logoutUser,
+  replaceProject,
+  restoreAuthenticatedUser,
+  updateProject as updateOwnedProject,
+  writeActiveProjectId,
+} from "./lib/authProjects";
+import type { AuthState, AuthUser, ProjectSummary } from "./lib/authProjects";
+import {
+  getProjectAHPState,
+  getProjectPrometheeState,
+  getProjectWorkspace,
+  importLegacyWorkspace,
+  ProjectWorkspaceRevisionConflictError,
+  saveProjectWorkspace,
+} from "./lib/projectWorkspacePersistence";
+import { activateProjectDataset, listProjectDatasets, removeProjectDataset } from "./lib/projectDatasets";
+import type { ProjectDatasetRecord } from "./lib/projectDatasets";
+import { belongsToProject } from "./lib/projectWorkspaceState";
+import { openWorkspaceDestination, type LandingAuthMode } from "./lib/landingRouting";
+import {
+  authenticatedEntryPath,
+  isPublicApplicationRoute,
+  parseApplicationRoute,
+  projectApplicationPath,
+  projectOptimizationPath,
+} from "./lib/appRouting";
+import {
+  activeOptimizationMessage,
+  activeOptimizationMode,
+  optimizationStepForSurface,
+} from "./lib/optimizationWorkflow";
+import { projectDatasetToWorkspace, resolveActiveProjectDataset } from "./lib/projectWorkflow";
+import { resolveDatasetExplorerDate } from "./lib/datasetWorkspace";
+import { isShellNavigationActive, nextMobileDrawerState } from "./lib/shellPresentation";
 
 
 const DRAWER_WIDTH = 264;
+const COLLAPSED_DRAWER_WIDTH = 84;
 const CONFIG_DEFAULTS_ENDPOINT = "/api/config/defaults";
 const DataUploadPage = lazy(() => import("./pages/DataUploadPage"));
+const DashboardPage = lazy(() => import("./pages/DashboardPage"));
+const AuthPage = lazy(() => import("./pages/AuthPage"));
+const LandingPage = lazy(() => import("./pages/LandingPage"));
+const ProjectsPage = lazy(() => import("./pages/ProjectsPage"));
 const OptimizationPage = lazy(() => import("./pages/OptimizationPage"));
-const ComparisonResultsDialog = lazy(() => import("./pages/ComparisonResultsDialog"));
-const ComparisonOptimizationDialog = lazy(() => import("./pages/ComparisonOptimizationDialog"));
+const ComparisonAHPConfiguration = lazy(() => import("./pages/ComparisonAHPConfiguration"));
+const ComparisonRecommendationPage = lazy(() => import("./pages/ComparisonRecommendationPage"));
+const ComparisonResultsPage = lazy(() => import("./pages/ComparisonResultsPage"));
+const ComparisonOptimizationPage = lazy(() => import("./pages/ComparisonOptimizationPage"));
+const ProjectResultsPage = lazy(() => import("./pages/ProjectResultsPage"));
 
 const INITIAL_WORKSPACE_DISPATCH_STRATEGY: WorkspaceDispatchStrategy = {
   status: "Reference Strategy",
@@ -147,7 +221,7 @@ const INITIAL_SINGLE_OPTIMIZATION_RUN_STATE: SingleOptimizationRunWorkspaceState
 
 const INITIAL_PERSISTED_WORKSPACE_STATE: PersistedWorkspaceState = {
   version: 1,
-  activePage: "Comparison Mode",
+  activePage: "Dashboard",
   dataset: null,
   dispatchStrategy: INITIAL_WORKSPACE_DISPATCH_STRATEGY,
   battery: null,
@@ -157,6 +231,7 @@ const INITIAL_PERSISTED_WORKSPACE_STATE: PersistedWorkspaceState = {
   selectedMode: null,
   activeOptimizationStep: null,
   operationalProfileDate: null,
+  datasetExplorerDate: null,
   comparisonAhp: null,
   comparisonConfiguration: null,
   comparisonRunState: INITIAL_COMPARISON_RUN_STATE,
@@ -164,16 +239,15 @@ const INITIAL_PERSISTED_WORKSPACE_STATE: PersistedWorkspaceState = {
   promethee: null,
 };
 
-type BatteryTypeName = "Low-cost" | "Medium-low" | "Medium" | "Medium-high";
+type BatteryTypeName = "Low-cost" | "Medium-low" | "Medium" | "High";
 type CriterionDirection = "minimize" | "maximize";
 type CriterionName =
-  | "total_annual_cost_rs"
+  | "total_annual_cost_Rs"
   | "cycle_based_life_years"
   | "round_trip_efficiency"
   | "weight_density_kg_per_kwh"
-  | "annual_om_cost_rs"
   | "warranty_years";
-type ActivePage = "Comparison Mode" | "Dispatch" | "Data Upload" | "Optimization";
+type ActivePage = "My Projects" | "Dashboard" | "Comparison Mode" | "Results" | "Dispatch" | "Data Upload" | "Optimization";
 type DispatchPeriodName = "Off-peak 1" | "Day" | "Peak" | "Off-peak 2";
 type EVSupplySource = "PV" | "BESS" | "Grid";
 type BackendExcessPvPriority = "BESS" | "Export";
@@ -223,6 +297,7 @@ interface EditableDispatchPeriod {
 }
 
 interface DefaultConfiguration {
+  scientific_configuration_version: number;
   battery_types: BatteryType[];
   criteria: Criterion[];
   ahp_matrix: number[][];
@@ -236,25 +311,21 @@ interface NavigationItem {
 }
 
 const navigationItems: NavigationItem[] = [
-  { label: "Dashboard", icon: DashboardRoundedIcon },
-  { label: "Data Upload", icon: CloudUploadRoundedIcon, page: "Data Upload" },
-  { label: "Dispatch", icon: BoltRoundedIcon, page: "Dispatch" },
+  { label: "Dashboard", icon: DashboardRoundedIcon, page: "Dashboard" },
+  { label: "My Projects", icon: FolderRoundedIcon, page: "My Projects" },
+  { label: "Dataset", icon: CloudUploadRoundedIcon, page: "Data Upload" },
   { label: "Optimization", icon: AutoGraphRoundedIcon, page: "Optimization" },
-  {
-    label: "Comparison Mode",
-    icon: CompareArrowsRoundedIcon,
-    page: "Comparison Mode",
-  },
-  { label: "Results", icon: AssessmentRoundedIcon },
+  { label: "Decision", icon: ScaleRoundedIcon, page: "Comparison Mode" },
+  { label: "Results", icon: AssessmentRoundedIcon, page: "Results" },
+  { label: "Documentation", icon: DescriptionRoundedIcon },
 ];
 
 const criterionLabels: Record<CriterionName, string> = {
-  total_annual_cost_rs: "Total Annual Cost",
-  cycle_based_life_years: "Cycle-Based Service Life",
-  round_trip_efficiency: "Round-Trip Efficiency",
-  weight_density_kg_per_kwh: "Weight Density",
-  annual_om_cost_rs: "Annual O&M Cost",
-  warranty_years: "Warranty Period",
+  total_annual_cost_Rs: "Annualized total cost",
+  cycle_based_life_years: "Cycle-based life",
+  round_trip_efficiency: "Round-trip efficiency",
+  weight_density_kg_per_kwh: "Weight density (kg/kWh)",
+  warranty_years: "Warranty period",
 };
 
 const priceFormatter = new Intl.NumberFormat("en-LK", {
@@ -520,8 +591,9 @@ function isDefaultConfiguration(value: unknown): value is DefaultConfiguration {
     Array.isArray(candidate.battery_types) &&
     candidate.battery_types.length === 4 &&
     Array.isArray(candidate.criteria) &&
-    candidate.criteria.length === 6 &&
+    candidate.criteria.length === 5 &&
     Array.isArray(candidate.ahp_matrix) &&
+    candidate.scientific_configuration_version === 3 &&
     Array.isArray(candidate.dispatch_periods) &&
     candidate.dispatch_periods.length === 4
   );
@@ -530,9 +602,19 @@ function isDefaultConfiguration(value: unknown): value is DefaultConfiguration {
 function SidebarContent({
   activePage,
   onNavigate,
+  user,
+  hasActiveProject,
+  onLogout,
+  collapsed,
+  onToggleCollapsed,
 }: {
   activePage: ActivePage;
   onNavigate: (page: ActivePage) => void;
+  user: AuthUser;
+  hasActiveProject: boolean;
+  onLogout: () => void;
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
 }) {
   return (
     <Box
@@ -543,7 +625,7 @@ function SidebarContent({
         color: "#d7e2ee",
       }}
     >
-      <Toolbar sx={{ minHeight: "72px !important", px: 2.5 }}>
+      <Toolbar sx={{ minHeight: "72px !important", px: collapsed ? 1.5 : 2.5, justifyContent: collapsed ? "center" : "flex-start" }}>
         <Stack direction="row" spacing={1.5} sx={{ alignItems: "center" }}>
           <Avatar
             variant="rounded"
@@ -557,12 +639,12 @@ function SidebarContent({
           >
             <BatteryChargingFullRoundedIcon fontSize="small" />
           </Avatar>
-          <Box>
+          <Box sx={{ display: collapsed ? "none" : "block" }}>
             <Typography
               variant="subtitle1"
               sx={{ color: "#ffffff", fontWeight: 800, lineHeight: 1.1 }}
             >
-              BESS Studio
+              BESS Decision
             </Typography>
             <Typography variant="caption" sx={{ color: "#8fa6bd" }}>
               Decision workspace
@@ -576,20 +658,21 @@ function SidebarContent({
       <Box sx={{ px: 1.5, py: 2.5 }}>
         <Typography
           variant="overline"
-          sx={{ color: "#6f879f", fontWeight: 800, letterSpacing: "0.12em", px: 1.5 }}
+          sx={{ display: collapsed ? "none" : "block", color: "#6f879f", fontWeight: 800, letterSpacing: "0.12em", px: 1.5 }}
         >
           Workspace
         </Typography>
         <List sx={{ mt: 0.75 }}>
           {navigationItems.map((item) => {
             const Icon = item.icon;
-            const selected = item.page === activePage;
+            const selected = isShellNavigationActive(activePage, item.page);
+            const disabled = !item.page || (!hasActiveProject && item.page !== "My Projects");
 
             return (
               <ListItemButton
                 key={item.label}
                 selected={selected}
-                disabled={!item.page}
+                disabled={disabled}
                 aria-current={selected ? "page" : undefined}
                 onClick={() => item.page && onNavigate(item.page)}
                 sx={{
@@ -598,11 +681,12 @@ function SidebarContent({
                   borderRadius: 2.5,
                   color: selected ? "#ffffff" : "#a8b9ca",
                   "&.Mui-selected": {
-                    bgcolor: "rgba(45, 212, 191, 0.16)",
-                    color: "#ffffff",
+                    bgcolor: "rgba(155,239,74,.11)",
+                    color: "#9BEF4A",
+                    boxShadow: "inset 3px 0 #9BEF4A",
                   },
                   "&.Mui-selected:hover": {
-                    bgcolor: "rgba(45, 212, 191, 0.2)",
+                    bgcolor: "rgba(155,239,74,.15)",
                   },
                   "&.Mui-disabled": {
                     color: "#71869a",
@@ -610,10 +694,10 @@ function SidebarContent({
                   },
                 }}
               >
-                <ListItemIcon sx={{ minWidth: 40, color: "inherit" }}>
+                <ListItemIcon sx={{ minWidth: collapsed ? 0 : 40, justifyContent: "center", color: "inherit" }}>
                   <Icon fontSize="small" />
                 </ListItemIcon>
-                <ListItemText
+                {!collapsed ? <ListItemText
                   primary={
                     <Typography
                       component="span"
@@ -622,34 +706,52 @@ function SidebarContent({
                       {item.label}
                     </Typography>
                   }
-                />
+                /> : null}
               </ListItemButton>
             );
           })}
         </List>
       </Box>
 
-      <Box sx={{ mt: "auto", p: 2 }}>
+      <Box sx={{ mt: "auto", p: collapsed ? 1.25 : 2 }}>
+        <Button
+          fullWidth
+          size="small"
+          color="inherit"
+          startIcon={collapsed ? undefined : <ChevronLeftRoundedIcon />}
+          onClick={onToggleCollapsed}
+          aria-label={collapsed ? "Expand menu" : "Collapse menu"}
+          sx={{ mb: 1 }}
+        >
+          {collapsed ? <ChevronRightRoundedIcon /> : "Collapse menu"}
+        </Button>
         <Paper
           elevation={0}
           sx={{
-            p: 1.75,
+            p: collapsed ? 1 : 1.75,
             borderRadius: 2.5,
             bgcolor: "rgba(255,255,255,0.055)",
             border: "1px solid rgba(255,255,255,0.08)",
             color: "#c6d3df",
           }}
         >
-          <Stack direction="row" spacing={1.25} sx={{ alignItems: "center" }}>
-            <VerifiedRoundedIcon sx={{ color: "#5eead4", fontSize: 21 }} />
-            <Box>
-              <Typography variant="caption" sx={{ display: "block", fontWeight: 800 }}>
-                Reference defaults
-              </Typography>
-              <Typography variant="caption" sx={{ color: "#8198ae" }}>
-                Read-only configuration
-              </Typography>
-            </Box>
+          <Stack spacing={1.25}>
+            <Stack direction="row" spacing={1.25} sx={{ alignItems: "center" }}>
+              <Avatar sx={{ width: 32, height: 32, bgcolor: "#2dd4bf", color: "#062c2a", fontSize: 13, fontWeight: 850 }}>
+                {user.display_name.slice(0, 2).toUpperCase()}
+              </Avatar>
+              <Box sx={{ minWidth: 0, display: collapsed ? "none" : "block" }}>
+                <Typography variant="caption" noWrap sx={{ display: "block", fontWeight: 800 }}>
+                  {user.display_name}
+                </Typography>
+                <Typography variant="caption" noWrap sx={{ display: "block", color: "#8198ae" }}>
+                  {user.email}
+                </Typography>
+              </Box>
+            </Stack>
+            <Button fullWidth size="small" color="inherit" startIcon={collapsed ? undefined : <LogoutRoundedIcon />} onClick={onLogout} aria-label="Sign out">
+              {collapsed ? <LogoutRoundedIcon /> : "Sign out"}
+            </Button>
           </Stack>
         </Paper>
       </Box>
@@ -2014,6 +2116,7 @@ function DispatchStrategyPage({
 }
 
 function ComparisonModePage({
+  projectId,
   dataset,
   dispatchStrategy,
   comparisonConfiguration,
@@ -2026,8 +2129,14 @@ function ComparisonModePage({
   onComparisonCompleted,
   onInvalidateScientificState,
   onOpenAHP,
-  onPrometheeChange,
+  onOpenResults,
+  onOpenDetailedResults,
+  onRunnerClose,
+  onViewDashboard,
+  startBlockedReason,
+  onViewActiveRun,
 }: {
+  projectId: string;
   dataset: WorkspaceDatasetSummary | null;
   dispatchStrategy: WorkspaceDispatchStrategy;
   comparisonConfiguration: ComparisonOptimizationConfiguration | null;
@@ -2040,13 +2149,17 @@ function ComparisonModePage({
   onComparisonCompleted: (comparison: ComparisonOptimizationWorkspaceState) => void;
   onInvalidateScientificState: () => void;
   onOpenAHP: () => void;
-  onPrometheeChange: (state: PrometheeWorkspaceState) => void;
+  onOpenResults: () => void;
+  onOpenDetailedResults: () => void;
+  onRunnerClose: () => void;
+  onViewDashboard: () => void;
+  startBlockedReason?: string | null;
+  onViewActiveRun?: () => void;
 }) {
   const [configuration, setConfiguration] = useState<DefaultConfiguration | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [requestVersion, setRequestVersion] = useState(0);
-  const [resultsOpen, setResultsOpen] = useState(false);
   const [runnerOpen, setRunnerOpen] = useState(false);
 
   useEffect(() => {
@@ -2101,12 +2214,50 @@ function ComparisonModePage({
     }
   }, [comparisonConfiguration, configuration, onComparisonConfigurationChange]);
 
+  const scientificContext = { projectId, datasetId: dataset?.datasetId ?? null };
   const rankingReady = Boolean(
     promethee
     && comparisonOptimization
-    && !isPrometheeResultStale(promethee, comparisonOptimization, comparisonAhp),
+    && !isPrometheeResultStale(
+      promethee,
+      comparisonOptimization,
+      comparisonAhp,
+      scientificContext,
+    ),
   );
-  const resultsEntryReady = canEnterComparisonResults(comparisonOptimization, comparisonAhp);
+  const resultsEntryReady = canEnterComparisonResults(
+    comparisonOptimization,
+    comparisonAhp,
+    scientificContext,
+  );
+
+  if (!isLoading && !error && configuration && comparisonConfiguration) {
+    return (
+      <Suspense fallback={<LoadingContent />}>
+        <ComparisonOptimizationPage
+          projectId={projectId}
+          configuration={comparisonConfiguration}
+          dataset={dataset}
+          dispatchStrategy={dispatchStrategy}
+          runState={comparisonRunState}
+          completedComparison={comparisonOptimization}
+          ahpState={comparisonAhp}
+          prometheeState={promethee}
+          onConfigurationChange={onComparisonConfigurationChange}
+          onRunStateChange={onComparisonRunStateChange}
+          onCompleted={onComparisonCompleted}
+          onInvalidateScientificState={onInvalidateScientificState}
+          onOpenAHP={onOpenAHP}
+          onOpenResults={onOpenResults}
+          onOpenDetailedResults={onOpenDetailedResults}
+          onBackToModes={onRunnerClose}
+          onViewDashboard={onViewDashboard}
+          startBlockedReason={startBlockedReason}
+          onViewActiveRun={onViewActiveRun}
+        />
+      </Suspense>
+    );
+  }
 
   return (
     <Stack spacing={3.5}>
@@ -2143,9 +2294,7 @@ function ComparisonModePage({
             Compare battery technologies
           </Typography>
           <Typography color="text.secondary" sx={{ mt: 1.25, lineHeight: 1.7 }}>
-            Review the default battery catalogue and the six criteria used to
-            evaluate cost, lifetime, efficiency, physical density, maintenance,
-            and warranty performance.
+            Review battery options and the six decision criteria.
           </Typography>
           {configuration && (
             <Stack direction="row" spacing={1} sx={{ mt: 2.25, flexWrap: "wrap", gap: 1 }}>
@@ -2174,7 +2323,7 @@ function ComparisonModePage({
             <Button
               variant="outlined"
               startIcon={<AssessmentRoundedIcon />}
-              onClick={() => setResultsOpen(true)}
+              onClick={onOpenResults}
               disabled={!resultsEntryReady}
               sx={{ alignSelf: { xs: "stretch", sm: "flex-start" } }}
             >
@@ -2228,7 +2377,7 @@ function ComparisonModePage({
                   Battery options
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mt: 0.4 }}>
-                  Default technologies available for comparison
+                  Catalogue technologies
                 </Typography>
               </Box>
               <Chip
@@ -2271,7 +2420,7 @@ function ComparisonModePage({
                   Decision criteria
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mt: 0.4 }}>
-                  Optimization direction for each comparison measure
+                  Minimize or maximize each measure
                 </Typography>
               </Box>
               <Stack direction="row" spacing={1}>
@@ -2305,39 +2454,56 @@ function ComparisonModePage({
         </>
       )}
       <Suspense fallback={null}>
-        {configuration && comparisonConfiguration && <ComparisonOptimizationDialog
+        {configuration && comparisonConfiguration && <ComparisonOptimizationPage
+          projectId={projectId}
           open={runnerOpen}
           configuration={comparisonConfiguration}
           dataset={dataset}
           dispatchStrategy={dispatchStrategy}
           runState={comparisonRunState}
           completedComparison={comparisonOptimization}
-          rankingReady={rankingReady}
+          ahpState={comparisonAhp}
+          prometheeState={promethee}
           onConfigurationChange={onComparisonConfigurationChange}
           onRunStateChange={onComparisonRunStateChange}
           onCompleted={onComparisonCompleted}
           onInvalidateScientificState={onInvalidateScientificState}
           onOpenAHP={() => transitionFromComparisonRunner(() => setRunnerOpen(false), onOpenAHP)}
-          onOpenResults={() => {
-            transitionFromComparisonRunner(() => setRunnerOpen(false), () => setResultsOpen(true));
+          onOpenResults={() => transitionFromComparisonRunner(() => setRunnerOpen(false), onOpenResults)}
+          onOpenDetailedResults={() => transitionFromComparisonRunner(() => setRunnerOpen(false), onOpenDetailedResults)}
+          startBlockedReason={startBlockedReason}
+          onViewActiveRun={onViewActiveRun}
+          onClose={() => {
+            setRunnerOpen(false);
+            onRunnerClose();
           }}
-          onClose={() => setRunnerOpen(false)}
         />}
-        <ComparisonResultsDialog
-          open={resultsOpen}
-          comparison={comparisonOptimization}
-          ahp={comparisonAhp}
-          promethee={promethee}
-          onPrometheeChange={onPrometheeChange}
-          onClose={() => setResultsOpen(false)}
-        />
       </Suspense>
     </Stack>
   );
 }
 
 export default function App() {
+  const theme = useTheme();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const applicationRoute = useMemo(
+    () => parseApplicationRoute(location.pathname),
+    [location.pathname],
+  );
+  const authDialogFullScreen = useMediaQuery(theme.breakpoints.down("sm"));
+  const [authState, setAuthState] = useState<AuthState>({ status: "loading", user: null });
+  const [authDialogOpen, setAuthDialogOpen] = useState(false);
+  const [authDialogMode, setAuthDialogMode] = useState<LandingAuthMode>("login");
+  const [authRestoreError, setAuthRestoreError] = useState<string | null>(null);
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [projectsLoading, setProjectsLoading] = useState(false);
+  const [projectsError, setProjectsError] = useState<string | null>(null);
+  const [projectDatasets, setProjectDatasets] = useState<ProjectDatasetRecord[]>([]);
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const [openingProjectId, setOpeningProjectId] = useState<string | null>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [activePage, setActivePage] = useState<ActivePage>(
     INITIAL_PERSISTED_WORKSPACE_STATE.activePage as ActivePage,
   );
@@ -2363,6 +2529,9 @@ export default function App() {
   const [operationalProfileDate, setOperationalProfileDate] = useState<string | null>(
     INITIAL_PERSISTED_WORKSPACE_STATE.operationalProfileDate,
   );
+  const [datasetExplorerDate, setDatasetExplorerDate] = useState<string | null>(
+    INITIAL_PERSISTED_WORKSPACE_STATE.datasetExplorerDate,
+  );
   const [comparisonAhp, setComparisonAhp] = useState<ComparisonAHPWorkspaceState | null>(
     INITIAL_PERSISTED_WORKSPACE_STATE.comparisonAhp,
   );
@@ -2378,33 +2547,247 @@ export default function App() {
   const [promethee, setPromethee] = useState<PrometheeWorkspaceState | null>(
     INITIAL_PERSISTED_WORKSPACE_STATE.promethee,
   );
+  const activeRunMode = activeOptimizationMode(
+    singleOptimizationRunState.phase,
+    comparisonRunState.phase,
+  );
+  const activeRunMessage = activeOptimizationMessage(activeRunMode);
+  const [restoredFromMongo, setRestoredFromMongo] = useState(false);
   const [restoreError, setRestoreError] = useState<string | null>(null);
   const [workspaceReady, setWorkspaceReady] = useState(false);
+  const [persistenceStatus, setPersistenceStatus] = useState<PersistenceStatus>("idle");
+  const [persistenceRetry, setPersistenceRetry] = useState(0);
+  const workspaceRevisionRef = useRef(0);
+  const workspaceSaveSequenceRef = useRef(0);
+  const lastRemoteFingerprintRef = useRef<string | null>(null);
+
+  const resetScientificWorkspace = useCallback(() => {
+    setUploadedDataset(null);
+    setProjectDatasets([]);
+    setWorkspaceDispatchStrategy(INITIAL_PERSISTED_WORKSPACE_STATE.dispatchStrategy);
+    setSingleOptimizationRunState(INITIAL_PERSISTED_WORKSPACE_STATE.runState);
+    setSelectedBatteryId(null);
+    setSelectedMode(null);
+    setBatteryConfiguration(null);
+    setSetupConfiguration(null);
+    setActiveOptimizationStep(null);
+    setOperationalProfileDate(null);
+    setDatasetExplorerDate(null);
+    setComparisonAhp(null);
+    setComparisonConfiguration(null);
+    setComparisonRunState(INITIAL_PERSISTED_WORKSPACE_STATE.comparisonRunState);
+    setComparisonOptimization(null);
+    setPromethee(null);
+    setRestoredFromMongo(false);
+    setRestoreError(null);
+    workspaceRevisionRef.current = 0;
+    lastRemoteFingerprintRef.current = null;
+  }, []);
+
+  const establishAuthenticatedShell = useCallback(async (user: AuthUser) => {
+    // A valid login is independent of the project-list hydration that follows.
+    // Enter the authenticated shell immediately so a slow project request cannot
+    // leave the user trapped on the sign-in surface.
+    setAuthState({ status: "authenticated", user });
+    setAuthRestoreError(null);
+    setProjectsLoading(true);
+    setProjectsError(null);
+    setWorkspaceReady(false);
+    try {
+      const ownedProjects = await fetchOwnedProjects();
+      const requestedRoute = parseApplicationRoute(window.location.pathname);
+      const requestedProject = requestedRoute.kind === "project"
+        ? ownedProjects.find((project) =>
+          project.project_id === requestedRoute.projectId && project.status === "active") ?? null
+        : null;
+      const selected = requestedRoute.kind === "project" ? requestedProject : null;
+      setProjects(ownedProjects);
+      setActiveProjectId(selected?.project_id ?? null);
+      if (selected) {
+        writeActiveProjectId(window.localStorage, selected.project_id);
+      } else if (requestedRoute.kind === "project") {
+        writeActiveProjectId(window.localStorage, null);
+        setProjectsError("Project was not found or is not available.");
+        navigate("/projects", { replace: true });
+      }
+      setActivePage(requestedRoute.kind === "projects" || !selected ? "My Projects" : "Dashboard");
+      if (!selected) setWorkspaceReady(true);
+    } catch (error) {
+      setProjects([]);
+      setActiveProjectId(null);
+      setProjectsError(error instanceof Error ? error.message : "Projects could not be loaded.");
+      setActivePage("My Projects");
+      setWorkspaceReady(true);
+    } finally {
+      setProjectsLoading(false);
+    }
+  }, [navigate]);
 
   useEffect(() => {
-    const storage = window.sessionStorage;
-    const persisted = readPersistedWorkspaceState(storage);
+    let cancelled = false;
+    void restoreAuthenticatedUser()
+      .then((user) => {
+        if (cancelled) return;
+        if (!user) {
+          setAuthState({ status: "unauthenticated", user: null });
+          return;
+        }
+        void establishAuthenticatedShell(user);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setAuthRestoreError(error instanceof Error ? error.message : "Authentication is unavailable.");
+        setAuthState({ status: "unauthenticated", user: null });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [establishAuthenticatedShell]);
 
-    if (!persisted) {
+  useEffect(() => {
+    if (authState.status === "loading") return;
+    if (authState.status !== "authenticated") {
+      if (!isPublicApplicationRoute(applicationRoute)) {
+        navigate("/", { replace: true });
+      }
+      return;
+    }
+    const authenticatedEntry = authenticatedEntryPath(applicationRoute);
+    if (authenticatedEntry) {
+      navigate(authenticatedEntry, { replace: true });
+      return;
+    }
+    if (applicationRoute.kind === "projects") {
+      setActivePage("My Projects");
+      setOpeningProjectId(null);
+      return;
+    }
+    if (applicationRoute.kind !== "project") return;
+    const requestedProject = projects.find(
+      (project) =>
+        project.project_id === applicationRoute.projectId && project.status === "active",
+    );
+    if (!requestedProject) {
+      setProjectsError("Project was not found or is not available.");
+      setActiveProjectId(null);
+      writeActiveProjectId(window.localStorage, null);
+      resetScientificWorkspace();
+      setWorkspaceReady(true);
+      setOpeningProjectId(null);
+      navigate("/projects", { replace: true });
+      return;
+    }
+    if (activeProjectId !== requestedProject.project_id) {
+      setWorkspaceReady(false);
+      setOpeningProjectId(requestedProject.project_id);
+      setActiveProjectId(requestedProject.project_id);
+      writeActiveProjectId(window.localStorage, requestedProject.project_id);
+    } else {
+      const optimizationStep = optimizationStepForSurface(applicationRoute.surface);
+      if (["results", "comparison-recommendation", "comparison-results"].includes(applicationRoute.surface) && workspaceReady) {
+        setActivePage("Results");
+      } else if (["comparison", "comparison-ahp"].includes(applicationRoute.surface) && workspaceReady) {
+        setActivePage("Comparison Mode");
+      } else if (applicationRoute.surface === "dataset" && workspaceReady) {
+        setActivePage("Data Upload");
+      } else if (applicationRoute.surface === "dispatch" && workspaceReady) {
+        setActivePage("Dispatch");
+      } else if (optimizationStep) {
+        setActivePage("Optimization");
+        setActiveOptimizationStep(optimizationStep);
+        if (optimizationStep !== "mode-selection") setSelectedMode("single");
+      } else if (workspaceReady) {
+        setActivePage("Dashboard");
+      }
+      if (workspaceReady) setOpeningProjectId(null);
+    }
+  }, [
+    activeProjectId,
+    applicationRoute,
+    authState.status,
+    navigate,
+    projects,
+    resetScientificWorkspace,
+    workspaceReady,
+  ]);
+
+  useEffect(() => {
+    if (authState.status === "authenticated") {
+      setAuthDialogOpen(false);
+      return;
+    }
+    if (applicationRoute.kind === "login" || applicationRoute.kind === "register") {
+      setAuthDialogMode(applicationRoute.kind);
+      setAuthDialogOpen(true);
+    } else {
+      setAuthDialogOpen(false);
+    }
+  }, [applicationRoute.kind, authState.status]);
+
+  useEffect(() => {
+    if (authState.status !== "authenticated") return;
+    if (!activeProjectId) {
+      resetScientificWorkspace();
       setWorkspaceReady(true);
       return;
     }
+    setWorkspaceReady(false);
+    resetScientificWorkspace();
+    const storage = window.sessionStorage;
+    const storageKey = getProjectWorkspaceStorageKey(activeProjectId);
+    const restoredLocal = readPersistedWorkspaceState(storage, storageKey);
+    const localPersisted = belongsToProject(restoredLocal, activeProjectId) ? restoredLocal : null;
+    let cancelled = false;
 
-    void validatePersistedWorkspaceState(persisted, {
-      datasetExists: async (datasetId: string, startDate: string) => {
-        try {
-          const response = await fetch(`/api/datasets/${encodeURIComponent(datasetId)}/day?date=${encodeURIComponent(startDate || "2000-01-01")}`, {
-            method: "GET",
-            headers: { Accept: "application/json" },
-          });
-          return response.status !== 404;
-        } catch {
-          return true;
-        }
-      },
+    const restore = async () => {
+      let persisted = localPersisted;
+      let selectedRemoteState = false;
+      let openedProject: ProjectSummary;
+      let datasets: ProjectDatasetRecord[];
+      let projectedAHP: Record<string, unknown> | null = null;
+      let projectedPromethee: Record<string, unknown> | null = null;
+      try {
+        const [project, remoteSnapshot, loadedDatasets, loadedAHP, loadedPromethee] = await Promise.all([
+          fetchOwnedProject(activeProjectId),
+          getProjectWorkspace(activeProjectId),
+          listProjectDatasets(activeProjectId),
+          getProjectAHPState(activeProjectId).catch(() => null),
+          getProjectPrometheeState(activeProjectId).catch(() => null),
+        ]);
+        if (cancelled) return;
+        openedProject = project;
+        datasets = loadedDatasets;
+        projectedAHP = loadedAHP;
+        projectedPromethee = loadedPromethee;
+        setProjects((current) => replaceProject(current, project));
+        setProjectDatasets(loadedDatasets);
+        workspaceRevisionRef.current = remoteSnapshot.revision;
+        const remoteState = isHydratableRemoteState(remoteSnapshot.state)
+          ? { ...remoteSnapshot.state, projectId: activeProjectId, persistenceRevision: remoteSnapshot.revision }
+          : null;
+        persisted = chooseNewerWorkspaceState(localPersisted, remoteState, remoteSnapshot.revision);
+        selectedRemoteState = Boolean(remoteState && persisted === remoteState);
+        setPersistenceStatus("saved");
+      } catch (error) {
+        if (cancelled) return;
+        setPersistenceStatus("failed");
+        setProjectsError(error instanceof Error ? error.message : "Project could not be opened.");
+        setActiveProjectId(null);
+        writeActiveProjectId(window.localStorage, null);
+        resetScientificWorkspace();
+        setWorkspaceReady(true);
+        setOpeningProjectId(null);
+        navigate("/projects", { replace: true });
+        return;
+      }
+
+      const result = await validatePersistedWorkspaceState(persisted, {
+      datasetExists: async (datasetId: string) => datasets.some(
+        (dataset) => dataset.dataset_id === datasetId && dataset.status !== "expired",
+      ),
       jobExists: async (jobId: string) => {
         try {
-          const response = await fetch(`/api/single-optimization/jobs/${encodeURIComponent(jobId)}`);
+          const response = await fetch(`/api/projects/${encodeURIComponent(activeProjectId)}/single-optimization/jobs/${encodeURIComponent(jobId)}`, { credentials: "include" });
           return response.status !== 404;
         } catch {
           return true;
@@ -2412,38 +2795,98 @@ export default function App() {
       },
       comparisonJobExists: async (jobId: string) => {
         try {
-          const response = await fetch(`/api/comparison-optimization/jobs/${encodeURIComponent(jobId)}`);
+          const response = await fetch(`/api/projects/${encodeURIComponent(activeProjectId)}/comparison-optimization/jobs/${encodeURIComponent(jobId)}`, { credentials: "include" });
           return response.status !== 404;
         } catch {
           return true;
         }
       },
-    }).then(({ state, error }) => {
+      });
+      if (cancelled) return;
+      const { error } = result;
+      const state = result.state ?? {
+        ...INITIAL_PERSISTED_WORKSPACE_STATE,
+        projectId: activeProjectId,
+        activeDatasetId: openedProject.active_dataset_id ?? null,
+      };
       if (error) {
         setRestoreError(error);
-        if (!state) clearPersistedWorkspaceState(storage);
       }
 
-      if (state) {
-        setActivePage(state.activePage as ActivePage);
-        setUploadedDataset(state.dataset);
-        setWorkspaceDispatchStrategy(state.dispatchStrategy);
-        setSingleOptimizationRunState(state.runState);
-        setSelectedBatteryId(state.selectedBatteryId);
-        setSelectedMode(state.selectedMode);
-        setBatteryConfiguration(state.battery);
-        setSetupConfiguration(state.setup);
-        setActiveOptimizationStep(state.activeOptimizationStep);
-        setOperationalProfileDate(state.operationalProfileDate);
-        setComparisonAhp(state.comparisonAhp);
-        setComparisonConfiguration(state.comparisonConfiguration);
-        setComparisonRunState(state.comparisonRunState);
-        setComparisonOptimization(state.comparisonOptimization);
-        setPromethee(state.promethee);
+      const activeDataset = resolveActiveProjectDataset(
+        openedProject,
+        datasets,
+        state.dataset,
+        state.activeDatasetId ?? null,
+      );
+      setUploadedDataset(activeDataset);
+      setWorkspaceDispatchStrategy(state.dispatchStrategy);
+      setSingleOptimizationRunState(state.runState);
+      setSelectedBatteryId(state.selectedBatteryId);
+      setSelectedMode(state.selectedMode);
+      setBatteryConfiguration(state.battery);
+      setSetupConfiguration(state.setup);
+      setActiveOptimizationStep(state.activeOptimizationStep);
+      setOperationalProfileDate(state.operationalProfileDate);
+      setDatasetExplorerDate(resolveDatasetExplorerDate(activeDataset, state.datasetExplorerDate));
+      const scientificContext = {
+        projectId: activeProjectId,
+        datasetId: activeDataset?.datasetId ?? null,
+      };
+      const projectedAHPState = sanitizeComparisonAHPState(projectedAHP);
+      const restoredAHPState = state.comparisonAhp?.accepted
+        ? state.comparisonAhp
+        : projectedAHPState && isAHPCurrent(
+          projectedAHPState,
+          state.comparisonOptimization,
+          scientificContext,
+        )
+          ? projectedAHPState
+          : state.comparisonAhp;
+      const projectedPrometheeState = sanitizePrometheeWorkspaceState(projectedPromethee);
+      const restoredPrometheeState = state.promethee
+        ?? (projectedPrometheeState && !isPrometheeResultStale(
+          projectedPrometheeState,
+          state.comparisonOptimization,
+          restoredAHPState,
+          scientificContext,
+        ) ? projectedPrometheeState : null);
+      setComparisonAhp(restoredAHPState);
+      setComparisonConfiguration(state.comparisonConfiguration);
+      setComparisonRunState(state.comparisonRunState);
+      setComparisonOptimization(state.comparisonOptimization);
+      setPromethee(restoredPrometheeState);
+      const restoredRoute = parseApplicationRoute(window.location.pathname);
+      if (restoredRoute.kind === "project") {
+        const optimizationStep = optimizationStepForSurface(restoredRoute.surface);
+        if (["results", "comparison-recommendation", "comparison-results"].includes(restoredRoute.surface)) {
+          setActivePage("Results");
+        } else if (["comparison", "comparison-ahp"].includes(restoredRoute.surface)) {
+          setActivePage("Comparison Mode");
+        } else if (restoredRoute.surface === "dataset") {
+          setActivePage("Data Upload");
+        } else if (restoredRoute.surface === "dispatch") {
+          setActivePage("Dispatch");
+        } else if (optimizationStep) {
+          setActivePage("Optimization");
+          setActiveOptimizationStep(optimizationStep);
+          if (optimizationStep !== "mode-selection") setSelectedMode("single");
+        } else {
+          setActivePage("Dashboard");
+        }
+      } else {
+        setActivePage("My Projects");
       }
+      setRestoredFromMongo(selectedRemoteState);
       setWorkspaceReady(true);
-    });
-  }, []);
+      setOpeningProjectId(null);
+    };
+
+    void restore();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeProjectId, authState.status, navigate, resetScientificWorkspace]);
 
   useEffect(() => {
     if (!workspaceReady) {
@@ -2451,7 +2894,12 @@ export default function App() {
     }
 
     const storage = window.sessionStorage;
+    if (!activeProjectId) return;
     const state = buildPersistedWorkspaceState({
+      projectId: activeProjectId,
+      activeDatasetId: uploadedDataset?.datasetId ?? null,
+      persistenceRevision: workspaceRevisionRef.current,
+      updatedAt: new Date().toISOString(),
       activePage,
       dataset: uploadedDataset,
       dispatchStrategy: workspaceDispatchStrategy,
@@ -2462,18 +2910,84 @@ export default function App() {
       selectedMode,
       activeOptimizationStep,
       operationalProfileDate,
+      datasetExplorerDate,
       comparisonAhp,
       comparisonConfiguration,
       comparisonRunState,
       comparisonOptimization,
       promethee,
     });
-    writePersistedWorkspaceState(storage, state);
-  }, [activePage, uploadedDataset, workspaceDispatchStrategy, batteryConfiguration, setupConfiguration, singleOptimizationRunState, selectedBatteryId, selectedMode, activeOptimizationStep, operationalProfileDate, comparisonAhp, comparisonConfiguration, comparisonRunState, comparisonOptimization, promethee, workspaceReady]);
+    writePersistedWorkspaceState(storage, state, getProjectWorkspaceStorageKey(activeProjectId));
+  }, [activePage, activeProjectId, uploadedDataset, workspaceDispatchStrategy, batteryConfiguration, setupConfiguration, singleOptimizationRunState, selectedBatteryId, selectedMode, activeOptimizationStep, operationalProfileDate, datasetExplorerDate, comparisonAhp, comparisonConfiguration, comparisonRunState, comparisonOptimization, promethee, workspaceReady]);
+
+  useEffect(() => {
+    if (!workspaceReady || !activeProjectId) return;
+    const localState = buildPersistedWorkspaceState({
+      projectId: activeProjectId,
+      activeDatasetId: uploadedDataset?.datasetId ?? null,
+      persistenceRevision: workspaceRevisionRef.current,
+      updatedAt: new Date().toISOString(),
+      activePage,
+      dataset: uploadedDataset,
+      dispatchStrategy: workspaceDispatchStrategy,
+      battery: batteryConfiguration,
+      setup: setupConfiguration,
+      runState: singleOptimizationRunState,
+      selectedBatteryId,
+      selectedMode,
+      activeOptimizationStep,
+      operationalProfileDate,
+      datasetExplorerDate,
+      comparisonAhp,
+      comparisonConfiguration,
+      comparisonRunState,
+      comparisonOptimization,
+      promethee,
+    });
+    const remoteState = buildRemoteWorkspaceState(localState, workspaceRevisionRef.current);
+    const fingerprint = remoteWorkspaceFingerprint(remoteState);
+    if (fingerprint === lastRemoteFingerprintRef.current && persistenceRetry === 0) return;
+    const saveSequence = workspaceSaveSequenceRef.current + 1;
+    workspaceSaveSequenceRef.current = saveSequence;
+
+    const timer = window.setTimeout(() => {
+      setPersistenceStatus("saving");
+      const saveLatest = async () => {
+        const expectedRevision = workspaceRevisionRef.current;
+        try {
+          return await saveProjectWorkspace(activeProjectId, remoteState, expectedRevision);
+        } catch (error) {
+          if (!(error instanceof ProjectWorkspaceRevisionConflictError)
+            || saveSequence !== workspaceSaveSequenceRef.current) throw error;
+          const currentSnapshot = await getProjectWorkspace(activeProjectId);
+          if (saveSequence !== workspaceSaveSequenceRef.current) return null;
+          workspaceRevisionRef.current = currentSnapshot.revision;
+          return saveProjectWorkspace(activeProjectId, remoteState, currentSnapshot.revision);
+        }
+      };
+      void saveLatest().then((snapshot) => {
+        if (!snapshot || saveSequence !== workspaceSaveSequenceRef.current) return;
+        workspaceRevisionRef.current = snapshot.revision;
+        lastRemoteFingerprintRef.current = fingerprint;
+        writePersistedWorkspaceState(
+          window.sessionStorage,
+          { ...remoteState, persistenceRevision: snapshot.revision },
+          getProjectWorkspaceStorageKey(activeProjectId),
+        );
+        setPersistenceStatus("saved");
+        if (persistenceRetry !== 0) setPersistenceRetry(0);
+      }).catch(() => {
+        if (saveSequence !== workspaceSaveSequenceRef.current) return;
+        setPersistenceStatus("failed");
+      });
+    }, comparisonAhp?.accepted || promethee ? 0 : 800);
+    return () => window.clearTimeout(timer);
+  }, [activePage, activeProjectId, uploadedDataset, workspaceDispatchStrategy, batteryConfiguration, setupConfiguration, singleOptimizationRunState, selectedBatteryId, selectedMode, activeOptimizationStep, operationalProfileDate, datasetExplorerDate, comparisonAhp, comparisonConfiguration, comparisonRunState, comparisonOptimization, promethee, workspaceReady, persistenceRetry]);
 
   const invalidateComparisonScience = useCallback(() => {
     setComparisonOptimization((current) => current ? { ...current, stale: true } : current);
     setComparisonAhp((current) => current?.accepted ? { ...current, accepted: false } : current);
+    setPromethee((current) => current ? { ...current, stale: true } : current);
   }, []);
 
   useEffect(() => {
@@ -2482,16 +2996,280 @@ export default function App() {
     if (synchronizeComparisonSnapshot(comparisonOptimization, currentSignature)?.stale) invalidateComparisonScience();
   }, [comparisonConfiguration, comparisonOptimization, invalidateComparisonScience, uploadedDataset, workspaceDispatchStrategy]);
 
+  const openActiveOptimization = useCallback(() => {
+    if (!activeProjectId || !activeRunMode) return;
+    navigate(projectOptimizationPath(
+      activeProjectId,
+      activeRunMode === "single" ? "single-run" : "comparison",
+    ));
+    setMobileOpen(false);
+  }, [activeProjectId, activeRunMode, navigate]);
+
   const openComparisonAHP = useCallback(() => {
+    if (!activeProjectId) return;
     setSelectedMode("comparison");
     setActiveOptimizationStep("comparison-ahp");
-    setActivePage("Optimization");
-  }, []);
+    navigate(projectOptimizationPath(activeProjectId, "comparison-ahp"));
+  }, [activeProjectId, navigate]);
 
   const handleNavigate = (page: ActivePage) => {
-    setActivePage(page);
+    if (page === "My Projects") {
+      navigate("/projects");
+      setMobileOpen(false);
+      return;
+    }
+    if (!activeProjectId) {
+      setProjectsError("Open a project before starting an optimization.");
+      navigate("/projects");
+      setMobileOpen(false);
+      return;
+    }
+    if (page === "Optimization") {
+      if (activeRunMode) {
+        openActiveOptimization();
+        return;
+      }
+      setActiveOptimizationStep("mode-selection");
+      navigate(projectOptimizationPath(activeProjectId));
+      setMobileOpen(false);
+      return;
+    }
+    if (page === "Comparison Mode") {
+      if (activeRunMode) {
+        openActiveOptimization();
+        return;
+      }
+      navigate(projectOptimizationPath(activeProjectId, "comparison"));
+      setMobileOpen(false);
+      return;
+    }
+    if (page === "Results") {
+      navigate(projectApplicationPath(activeProjectId, "results"));
+      setMobileOpen(false);
+      return;
+    }
+    if (page === "Dashboard") {
+      navigate(projectApplicationPath(activeProjectId));
+    } else if (page === "Data Upload") {
+      navigate(projectApplicationPath(activeProjectId, "dataset"));
+    } else if (page === "Dispatch") {
+      navigate(projectApplicationPath(activeProjectId, "dispatch"));
+    } else {
+      setActivePage(page);
+    }
     setMobileOpen(false);
   };
+
+  const handleLogout = useCallback(async () => {
+    try {
+      await logoutUser();
+    } finally {
+      writeActiveProjectId(window.localStorage, null);
+      const signedOut = createSignedOutShellState();
+      setActiveProjectId(signedOut.activeProjectId);
+      setProjects(signedOut.projects);
+      resetScientificWorkspace();
+      setWorkspaceReady(false);
+      setAuthState(signedOut.authState);
+      setAuthDialogOpen(false);
+      setMobileOpen(false);
+      navigate("/", { replace: true });
+    }
+  }, [navigate, resetScientificWorkspace]);
+
+  const handleAuthenticatedFromLanding = useCallback((user: AuthUser) => {
+    setActivePage("My Projects");
+    setAuthDialogOpen(false);
+    navigate("/projects", { replace: true });
+    void establishAuthenticatedShell(user);
+  }, [establishAuthenticatedShell, navigate]);
+
+  const handleOpenAuth = useCallback((mode: LandingAuthMode) => {
+    setAuthRestoreError(null);
+    setAuthDialogMode(mode);
+    setAuthDialogOpen(true);
+    navigate(mode === "login" ? "/login" : "/register");
+  }, [navigate]);
+
+  const handleOpenWorkspace = useCallback(() => {
+    if (authState.status !== "authenticated") {
+      handleOpenAuth("register");
+      return;
+    }
+    const destination = openWorkspaceDestination(projects, activeProjectId);
+    if (destination.projectId) {
+      navigate(projectApplicationPath(destination.projectId));
+    } else {
+      navigate("/projects");
+    }
+  }, [activeProjectId, authState.status, handleOpenAuth, navigate, projects]);
+
+  const handleViewProjects = useCallback(() => {
+    if (authState.status !== "authenticated") {
+      handleOpenAuth("login");
+      return;
+    }
+    navigate("/projects");
+  }, [authState.status, handleOpenAuth, navigate]);
+
+  const handleCreateProject = useCallback(async (name: string, description: string) => {
+    setProjectsError(null);
+    try {
+      const created = await createOwnedProject(name, description);
+      setProjects((current) => replaceProject(current, created));
+    } catch (error) {
+      setProjectsError(error instanceof Error ? error.message : "Project could not be created.");
+      throw error;
+    }
+  }, []);
+
+  const handleUpdateProject = useCallback(async (projectId: string, name: string, description: string) => {
+    setProjectsError(null);
+    try {
+      const updated = await updateOwnedProject(projectId, { name, description });
+      setProjects((current) => replaceProject(current, updated));
+    } catch (error) {
+      setProjectsError(error instanceof Error ? error.message : "Project could not be updated.");
+      throw error;
+    }
+  }, []);
+
+  const handleDeleteProject = useCallback(async (projectId: string) => {
+    setProjectsError(null);
+    try {
+      const removed = await archiveOwnedProject(projectId);
+      setProjects((current) => removed.status === "archived"
+        ? current.filter((project) => project.project_id !== removed.project_id)
+        : replaceProject(current, removed));
+      if (activeProjectId === projectId) {
+        setActiveProjectId(null);
+        writeActiveProjectId(window.localStorage, null);
+        resetScientificWorkspace();
+        setActivePage("My Projects");
+        navigate("/projects", { replace: true });
+      }
+    } catch (error) {
+      setProjectsError(error instanceof Error ? error.message : "Project could not be deleted.");
+      throw error;
+    }
+  }, [activeProjectId, navigate, resetScientificWorkspace]);
+
+  const handleOpenProject = useCallback((projectId: string) => {
+    const switchProject = () => {
+      setProjectsError(null);
+      setOpeningProjectId(projectId);
+      if (activeProjectId && workspaceReady && activeProjectId !== projectId) {
+        const state = buildPersistedWorkspaceState({
+          projectId: activeProjectId,
+          activeDatasetId: uploadedDataset?.datasetId ?? null,
+          persistenceRevision: workspaceRevisionRef.current,
+          updatedAt: new Date().toISOString(),
+          activePage,
+          dataset: uploadedDataset,
+          dispatchStrategy: workspaceDispatchStrategy,
+          battery: batteryConfiguration,
+          setup: setupConfiguration,
+          runState: singleOptimizationRunState,
+          selectedBatteryId,
+          selectedMode,
+          activeOptimizationStep,
+          operationalProfileDate,
+          datasetExplorerDate,
+          comparisonAhp,
+          comparisonConfiguration,
+          comparisonRunState,
+          comparisonOptimization,
+          promethee,
+        });
+        writePersistedWorkspaceState(window.sessionStorage, state, getProjectWorkspaceStorageKey(activeProjectId));
+        void saveProjectWorkspace(
+          activeProjectId,
+          buildRemoteWorkspaceState(state, workspaceRevisionRef.current),
+          workspaceRevisionRef.current,
+        ).catch(() => setPersistenceStatus("failed"));
+      }
+      if (activeProjectId === projectId && workspaceReady) {
+        setActivePage("Dashboard");
+        setOpeningProjectId(null);
+      }
+      navigate(projectApplicationPath(projectId));
+    };
+    switchProject();
+  }, [activeOptimizationStep, activePage, activeProjectId, batteryConfiguration, comparisonAhp, comparisonConfiguration, comparisonOptimization, comparisonRunState, datasetExplorerDate, navigate, operationalProfileDate, promethee, selectedBatteryId, selectedMode, setupConfiguration, singleOptimizationRunState, uploadedDataset, workspaceDispatchStrategy, workspaceReady]);
+
+  const handleImportPreviousWorkspace = useCallback(async () => {
+    if (!activeProjectId) return;
+    const legacyWorkspaceId = window.localStorage.getItem(getWorkspaceIdStorageKey());
+    if (!legacyWorkspaceId) {
+      setRestoreError("No previous anonymous workspace was found in this browser.");
+      return;
+    }
+    try {
+      const snapshot = await importLegacyWorkspace(activeProjectId, legacyWorkspaceId);
+      workspaceRevisionRef.current = snapshot.revision;
+      const state = snapshot.state as PersistedWorkspaceState;
+      writePersistedWorkspaceState(window.sessionStorage, state, getProjectWorkspaceStorageKey(activeProjectId));
+      setWorkspaceReady(false);
+      setActiveProjectId(null);
+      window.setTimeout(() => setActiveProjectId(activeProjectId), 0);
+    } catch (error) {
+      setRestoreError(error instanceof Error ? error.message : "Previous workspace could not be imported.");
+    }
+  }, [activeProjectId]);
+
+  const handleDashboardAction = useCallback((action: DashboardQuickAction) => {
+    setMobileOpen(false);
+    if (action === "dataset") {
+      if (activeProjectId) navigate(projectApplicationPath(activeProjectId, "dataset"));
+      return;
+    }
+    if (action === "single") {
+      if (activeRunMode) {
+        openActiveOptimization();
+        return;
+      }
+      if (activeProjectId) navigate(projectOptimizationPath(activeProjectId));
+      return;
+    }
+    if (action === "comparison") {
+      if (activeRunMode) {
+        openActiveOptimization();
+        return;
+      }
+      if (activeProjectId) navigate(projectOptimizationPath(activeProjectId, "comparison"));
+      return;
+    }
+    if (action === "ahp") {
+      openComparisonAHP();
+      return;
+    }
+    if (!activeProjectId) return;
+    const context = { projectId: activeProjectId, datasetId: uploadedDataset?.datasetId ?? null };
+    const stage = deriveComparisonDecisionStage({
+      comparison: comparisonOptimization,
+      ahp: comparisonAhp,
+      promethee,
+      context,
+      comparisonRunning: ["submitting", "queued", "running", "cancelling"].includes(comparisonRunState.phase),
+    });
+    navigate(projectOptimizationPath(
+      activeProjectId,
+      destinationForComparisonDecisionStage(stage),
+    ));
+  }, [activeProjectId, activeRunMode, comparisonAhp, comparisonOptimization, comparisonRunState.phase, navigate, openActiveOptimization, openComparisonAHP, promethee, uploadedDataset?.datasetId]);
+
+  const handleDashboardViewRun = useCallback((mode: "Single Optimization" | "Battery Comparison") => {
+    setMobileOpen(false);
+    if (activeRunMode) {
+      openActiveOptimization();
+      return;
+    }
+    if (mode === "Battery Comparison") {
+      if (activeProjectId) navigate(projectOptimizationPath(activeProjectId, "comparison"));
+      return;
+    }
+    if (activeProjectId) navigate(projectOptimizationPath(activeProjectId, "single-run"));
+  }, [activeProjectId, activeRunMode, navigate, openActiveOptimization]);
 
   const handleOptimizationStateChange = (nextState: {
     selectedMode: "single" | "comparison" | null;
@@ -2506,7 +3284,15 @@ export default function App() {
     setBatteryConfiguration(nextState.batteryConfiguration);
     setSetupConfiguration(nextState.setupConfiguration);
     setActiveOptimizationStep(nextState.activeStep);
-    setComparisonAhp(nextState.comparisonAhp);
+    setComparisonAhp(
+      nextState.comparisonAhp && activeProjectId && comparisonOptimization
+        ? linkAHPStateToComparison(nextState.comparisonAhp, {
+            projectId: activeProjectId,
+            datasetId: uploadedDataset?.datasetId ?? null,
+            comparisonRevision: comparisonOptimization.revision,
+          })
+        : nextState.comparisonAhp,
+    );
   };
 
   const workspaceStatus = useMemo(() => {
@@ -2527,11 +3313,137 @@ export default function App() {
     return { datasetStatus, optimizationStatus, profilesStatus };
   }, [restoreError, singleOptimizationRunState]);
 
-  const sidebar = (
-    <SidebarContent activePage={activePage} onNavigate={handleNavigate} />
+  const dashboardModel = useMemo(
+    () => buildDashboardModel({
+      projectId: activeProjectId,
+      activeDatasetId: uploadedDataset?.datasetId ?? null,
+      dataset: uploadedDataset,
+      singleRun: singleOptimizationRunState,
+      comparisonRun: comparisonRunState,
+      comparison: comparisonOptimization,
+      ahp: comparisonAhp,
+      promethee,
+      restoredFromMongo,
+      persistenceStatus,
+    }),
+    [
+      activeProjectId,
+      comparisonAhp,
+      comparisonOptimization,
+      comparisonRunState,
+      persistenceStatus,
+      promethee,
+      restoredFromMongo,
+      singleOptimizationRunState,
+      uploadedDataset,
+    ],
   );
 
-  if (!workspaceReady) {
+  const activeProject = useMemo(
+    () => projects.find((project) => project.project_id === activeProjectId) ?? null,
+    [activeProjectId, projects],
+  );
+
+  const sidebar = (
+    authState.status === "authenticated" ? (
+      <SidebarContent
+        activePage={activePage}
+        onNavigate={handleNavigate}
+        user={authState.user}
+        hasActiveProject={Boolean(activeProject)}
+        onLogout={() => void handleLogout()}
+        collapsed={sidebarCollapsed}
+        onToggleCollapsed={() => setSidebarCollapsed((current) => !current)}
+      />
+    ) : null
+  );
+
+  const mobileSidebar = (
+    authState.status === "authenticated" ? (
+      <SidebarContent
+        activePage={activePage}
+        onNavigate={(page) => { setMobileOpen(nextMobileDrawerState("navigate")); handleNavigate(page); }}
+        user={authState.user}
+        hasActiveProject={Boolean(activeProject)}
+        onLogout={() => void handleLogout()}
+        collapsed={false}
+        onToggleCollapsed={() => setMobileOpen(false)}
+      />
+    ) : null
+  );
+
+  if (authState.status === "loading" && !isPublicApplicationRoute(applicationRoute)) {
+    return (
+      <Box sx={{ display: "grid", minHeight: "100vh", placeItems: "center", bgcolor: "background.default" }}>
+        <Typography variant="body1" color="text.secondary">Checking session...</Typography>
+      </Box>
+    );
+  }
+
+  if (isPublicApplicationRoute(applicationRoute) || authState.status !== "authenticated") {
+    return (
+      <>
+        <Suspense fallback={<LoadingContent />}>
+          <LandingPage
+            authenticated={authState.status === "authenticated"}
+            displayName={authState.status === "authenticated" ? authState.user.display_name : null}
+            onOpenAuth={handleOpenAuth}
+            onOpenWorkspace={handleOpenWorkspace}
+            onViewProjects={handleViewProjects}
+          />
+        </Suspense>
+        <Dialog
+          open={authDialogOpen}
+          onClose={() => navigate("/")}
+          fullScreen={authDialogFullScreen}
+          fullWidth
+          maxWidth="lg"
+          aria-labelledby="authentication-dialog-title"
+          slotProps={{
+            paper: {
+              sx: {
+                borderRadius: authDialogFullScreen ? 0 : "28px",
+                overflow: "hidden",
+                background: "#0D1D2D",
+              },
+            },
+          }}
+        >
+          <DialogTitle
+            component="div"
+            sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", pb: 0 }}
+          >
+            <Typography id="authentication-dialog-title" component="h2" variant="h6" sx={{ fontWeight: 900 }}>
+              {authDialogMode === "login" ? "Login" : "Create Account"}
+            </Typography>
+            <IconButton aria-label="Close authentication" onClick={() => navigate("/")}>
+              <CloseRoundedIcon />
+            </IconButton>
+          </DialogTitle>
+          <DialogContent sx={{ p: 0 }}>
+            <Suspense fallback={<LoadingContent />}>
+              <AuthPage
+                embedded
+                initialMode={authDialogMode}
+                onAuthenticated={handleAuthenticatedFromLanding}
+                onModeChange={(mode) => {
+                  setAuthDialogMode(mode);
+                  navigate(mode === "login" ? "/login" : "/register", { replace: true });
+                }}
+                serviceError={authRestoreError}
+              />
+            </Suspense>
+          </DialogContent>
+        </Dialog>
+      </>
+    );
+  }
+
+  const optimizationRouteVisibleWhileLoading =
+    applicationRoute.kind === "project"
+    && optimizationStepForSurface(applicationRoute.surface) !== null;
+
+  if (!workspaceReady && !optimizationRouteVisibleWhileLoading) {
     return (
       <Box sx={{ display: "grid", minHeight: "100vh", placeItems: "center", bgcolor: "background.default" }}>
         <Paper variant="outlined" sx={{ p: 4, borderRadius: "24px", minWidth: { xs: 280, sm: 360 } }}>
@@ -2548,10 +3460,10 @@ export default function App() {
         position="fixed"
         elevation={0}
         sx={{
-          width: { md: `calc(100% - ${DRAWER_WIDTH}px)` },
-          ml: { md: `${DRAWER_WIDTH}px` },
+          width: { md: `calc(100% - ${sidebarCollapsed ? COLLAPSED_DRAWER_WIDTH : DRAWER_WIDTH}px)` },
+          ml: { md: `${sidebarCollapsed ? COLLAPSED_DRAWER_WIDTH : DRAWER_WIDTH}px` },
           color: "text.primary",
-          bgcolor: "rgba(255,255,255,0.9)",
+          bgcolor: "rgba(7,17,29,.88)",
           backdropFilter: "blur(14px)",
           borderBottom: "1px solid",
           borderColor: "divider",
@@ -2562,33 +3474,60 @@ export default function App() {
             color="inherit"
             aria-label="Open navigation"
             edge="start"
-            onClick={() => setMobileOpen(true)}
+            onClick={() => setMobileOpen(nextMobileDrawerState("open"))}
             sx={{ mr: 1.5, display: { md: "none" } }}
           >
             <MenuRoundedIcon />
           </IconButton>
-          <Box sx={{ flexGrow: 1 }}>
+          <Box sx={{ flexGrow: 1, minWidth: 0 }}>
             <Typography variant="subtitle1" sx={{ fontWeight: 800, lineHeight: 1.15 }}>
               {activePage}
             </Typography>
-            <Typography variant="caption" color="text.secondary">
-              {activePage === "Dispatch"
-                ? "Default reference dispatch strategy"
-                : activePage === "Data Upload"
-                  ? "CSV validation and 15-minute day explorer"
-                  : activePage === "Optimization"
-                    ? "Choose how the optimization workflow should run"
-                  : "Default battery configuration"}
+            <Typography variant="caption" color="text.secondary" noWrap>
+              {activeProject?.name ?? "Project workspace"}
             </Typography>
           </Box>
+          {activeProject && activePage !== "My Projects" ? (
+            <Button
+              size="small"
+              variant="text"
+              startIcon={<FolderRoundedIcon />}
+              onClick={() => navigate("/projects")}
+              sx={{ mr: 1, display: { xs: "none", sm: "inline-flex" } }}
+            >
+              {activeProject.name} · Switch
+            </Button>
+          ) : null}
+          {activeProject && uploadedDataset ? <Chip
+            label={uploadedDataset.status === "expired" ? "Dataset expired" : "Dataset ready"}
+            size="small"
+            color={uploadedDataset.status === "expired" ? "warning" : "success"}
+            variant="outlined"
+            sx={{ display: { xs: "none", lg: "inline-flex" }, mr: 1, fontWeight: 750 }}
+          /> : null}
+          {dashboardModel.activeJob ? <Chip
+            label={`${dashboardModel.activeJob.status} · ${dashboardModel.activeJob.progressPercent.toFixed(0)}%`}
+            size="small"
+            color="info"
+            clickable
+            onClick={openActiveOptimization}
+            title="View running optimization"
+            sx={{ display: { xs: "none", lg: "inline-flex" }, mr: 1, fontWeight: 750 }}
+          /> : null}
           <Chip
             icon={
               activePage === "Dispatch" ? (
                 <BoltRoundedIcon />
+              ) : activePage === "My Projects" ? (
+                <FolderRoundedIcon />
               ) : activePage === "Data Upload" ? (
                 <CloudUploadRoundedIcon />
               ) : activePage === "Optimization" ? (
                 <AutoGraphRoundedIcon />
+              ) : activePage === "Dashboard" ? (
+                <DashboardRoundedIcon />
+              ) : activePage === "Results" ? (
+                <AssessmentRoundedIcon />
               ) : (
                 <ScaleRoundedIcon />
               )
@@ -2596,41 +3535,55 @@ export default function App() {
             label={
               activePage === "Dispatch"
                 ? "Default strategy"
+                : activePage === "My Projects"
+                  ? `${projects.length} project${projects.length === 1 ? "" : "s"}`
                 : activePage === "Data Upload"
                   ? "Annual dataset"
                   : activePage === "Optimization"
                     ? "Mode setup"
-                  : "Reference setup"
+                    : activePage === "Dashboard"
+                      ? "Workspace overview"
+                    : activePage === "Results"
+                      ? "Final decision"
+                    : "Reference setup"
             }
             size="small"
             sx={{
               display: { xs: "none", sm: "inline-flex" },
-              bgcolor: "#f0fdfa",
-              color: "#0f766e",
+              bgcolor: "rgba(155,239,74,.08)",
+              color: "primary.main",
               fontWeight: 750,
               "& .MuiChip-icon": { color: "inherit" },
             }}
           />
+          <Stack direction="row" spacing={1} sx={{ ml: 1.25, alignItems: "center" }}>
+            <Avatar sx={{ width: 32, height: 32, bgcolor: "primary.main", color: "primary.contrastText", fontSize: 12, fontWeight: 900 }}>
+              {authState.user.display_name.slice(0, 2).toUpperCase()}
+            </Avatar>
+            <Typography variant="caption" sx={{ display: { xs: "none", xl: "block" }, fontWeight: 800 }}>
+              {authState.user.display_name}
+            </Typography>
+          </Stack>
         </Toolbar>
       </AppBar>
 
-      <Box component="nav" aria-label="Primary navigation" sx={{ width: { md: DRAWER_WIDTH }, flexShrink: { md: 0 } }}>
+      <Box component="nav" aria-label="Primary navigation" sx={{ width: { md: sidebarCollapsed ? COLLAPSED_DRAWER_WIDTH : DRAWER_WIDTH }, flexShrink: { md: 0 }, transition: "width 180ms ease" }}>
         <Drawer
           variant="temporary"
           open={mobileOpen}
-          onClose={() => setMobileOpen(false)}
+          onClose={() => setMobileOpen(nextMobileDrawerState("close"))}
           ModalProps={{ keepMounted: true }}
           sx={{
             display: { xs: "block", md: "none" },
             "& .MuiDrawer-paper": {
               width: DRAWER_WIDTH,
               boxSizing: "border-box",
-              bgcolor: "#0d1b2a",
+              bgcolor: "#081522",
               borderRight: 0,
             },
           }}
         >
-          {sidebar}
+          {mobileSidebar}
         </Drawer>
         <Drawer
           variant="permanent"
@@ -2638,10 +3591,11 @@ export default function App() {
           sx={{
             display: { xs: "none", md: "block" },
             "& .MuiDrawer-paper": {
-              width: DRAWER_WIDTH,
+              width: sidebarCollapsed ? COLLAPSED_DRAWER_WIDTH : DRAWER_WIDTH,
               boxSizing: "border-box",
-              bgcolor: "#0d1b2a",
+              bgcolor: "#081522",
               borderRight: 0,
+              transition: "width 180ms ease",
             },
           }}
         >
@@ -2653,7 +3607,7 @@ export default function App() {
         component="main"
         sx={{
           flexGrow: 1,
-          width: { xs: "100%", md: `calc(100% - ${DRAWER_WIDTH}px)` },
+          width: { xs: "100%", md: `calc(100% - ${sidebarCollapsed ? COLLAPSED_DRAWER_WIDTH : DRAWER_WIDTH}px)` },
           minWidth: 0,
         }}
       >
@@ -2665,22 +3619,66 @@ export default function App() {
               <Typography variant="body2">{restoreError}</Typography>
             </Alert>
           )}
-          <Paper elevation={0} sx={{ mb: 2.5, p: { xs: 1.6, sm: 2.1 }, borderRadius: "20px", border: "1px solid #dce7ec", background: "linear-gradient(135deg, #f8fffd 0%, #f7fbff 100%)" }}>
+          {activeProject && !uploadedDataset && activePage === "Dashboard" && window.localStorage.getItem(getWorkspaceIdStorageKey()) ? (
+            <Alert
+              severity="info"
+              sx={{ mb: 2.5, borderRadius: "16px" }}
+              action={<Button color="inherit" size="small" onClick={() => void handleImportPreviousWorkspace()}>Import Previous Workspace</Button>}
+            >
+              A previous anonymous workspace is available for one-time import.
+            </Alert>
+          ) : null}
+          {activePage !== "Dashboard" && activePage !== "My Projects" ? <Paper elevation={0} sx={{ mb: 2.5, p: { xs: 1.6, sm: 2.1 }, borderRadius: "16px", border: "1px solid", borderColor: "divider", bgcolor: "rgba(13,29,45,.78)" }}>
             <Stack direction={{ xs: "column", sm: "row" }} spacing={1.25} sx={{ justifyContent: "space-between", alignItems: { sm: "center" } }}>
               <Box>
                 <Typography variant="subtitle2" sx={{ fontWeight: 850 }}>Workspace status</Typography>
-                <Typography variant="body2" color="text.secondary">Your current dataset, optimization run, and operational profiles stay available across navigation and refresh.</Typography>
               </Box>
               <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+                <Chip
+                  size="small"
+                  label={`Persistence: ${persistenceStatus === "saving" ? "Saving…" : persistenceStatus === "saved" ? "Saved" : persistenceStatus === "failed" ? "Save failed" : "Local"}`}
+                  color={persistenceStatus === "saved" ? "success" : persistenceStatus === "failed" ? "warning" : "default"}
+                  variant="outlined"
+                  onClick={persistenceStatus === "failed" ? () => setPersistenceRetry((value) => value + 1) : undefined}
+                  title={persistenceStatus === "failed" ? "Select to retry workspace persistence." : undefined}
+                />
                 <Chip size="small" label={`Dataset: ${workspaceStatus.datasetStatus}`} color={workspaceStatus.datasetStatus === "Available" ? "success" : "default"} variant="outlined" />
                 <Chip size="small" label={`Optimization: ${workspaceStatus.optimizationStatus}`} color={workspaceStatus.optimizationStatus === "Completed" ? "success" : workspaceStatus.optimizationStatus === "Running" ? "info" : workspaceStatus.optimizationStatus === "Expired" ? "warning" : "default"} variant="outlined" />
                 <Chip size="small" label={`Profiles: ${workspaceStatus.profilesStatus}`} color={workspaceStatus.profilesStatus === "Available" ? "success" : workspaceStatus.profilesStatus === "Error" ? "error" : "default"} variant="outlined" />
               </Stack>
             </Stack>
-          </Paper>
-          <Box sx={{ display: activePage === "Optimization" ? "block" : "none" }}>
+          </Paper> : null}
+          {activePage === "My Projects" ? (
+            <Suspense fallback={<LoadingContent />}>
+              <ProjectsPage
+                projects={projects}
+                loading={projectsLoading}
+                error={projectsError}
+                onCreate={handleCreateProject}
+                onUpdate={handleUpdateProject}
+                onDelete={handleDeleteProject}
+                onOpen={handleOpenProject}
+                openingProjectId={openingProjectId}
+                activeProjectId={activeProjectId}
+                activeWorkflowStatus={dashboardModel.promethee.status === "Current" ? "Decision ready" : dashboardModel.activeJob?.status ?? "Ready"}
+              />
+            </Suspense>
+          ) : null}
+          {activePage === "Dashboard" ? (
+            <Suspense fallback={<LoadingContent />}>
+              <DashboardPage
+                projectName={activeProject?.name ?? "Project"}
+                displayName={authState.user.display_name}
+                model={dashboardModel}
+                onAction={handleDashboardAction}
+                onViewRun={handleDashboardViewRun}
+              />
+            </Suspense>
+          ) : null}
+          {activeProject ? <Box sx={{ display: activePage === "Optimization" ? "block" : "none" }}>
             <Suspense fallback={<LoadingContent />}>
               <OptimizationPage
+                projectId={activeProjectId!}
                 dataset={uploadedDataset}
                 dispatchStrategy={workspaceDispatchStrategy}
                 onGoToDataUpload={() => handleNavigate("Data Upload")}
@@ -2695,14 +3693,91 @@ export default function App() {
                 operationalProfileDate={operationalProfileDate}
                 onOperationalProfileDateChange={setOperationalProfileDate}
                 comparisonAhp={comparisonAhp}
-                onOpenComparisonMode={() => handleNavigate("Comparison Mode")}
+                projectReady={workspaceReady}
+                comparisonRunPhase={comparisonRunState.phase}
+                onOpenComparisonMode={() => {
+                  if (activeRunMode) {
+                    openActiveOptimization();
+                    return;
+                  }
+                  navigate(projectOptimizationPath(activeProjectId!, "comparison"));
+                }}
+                onViewActiveRun={openActiveOptimization}
+                onViewResults={() => navigate(projectApplicationPath(activeProjectId!, "results"))}
+                onStepChange={(step) => {
+                  const surface = step === "mode-selection"
+                    ? "optimization"
+                    : step;
+                  navigate(projectOptimizationPath(activeProjectId!, surface));
+                }}
                 onStateChange={handleOptimizationStateChange}
               />
             </Suspense>
-          </Box>
+          </Box> : null}
           {activePage === "Data Upload" ? (
             <Suspense fallback={<LoadingContent />}>
-              <DataUploadPage onDatasetUploaded={setUploadedDataset} />
+              <DataUploadPage
+                projectId={activeProjectId!}
+                dataset={uploadedDataset}
+                projectDatasets={projectDatasets}
+                selectedDate={datasetExplorerDate}
+                onDatasetUploaded={(dataset) => {
+                  setProjects((current) => current.map((project) => project.project_id === activeProjectId ? { ...project, active_dataset_id: dataset.datasetId } : project));
+                  setUploadedDataset(dataset);
+                  setDatasetExplorerDate(dataset.startDate);
+                  setSingleOptimizationRunState(INITIAL_PERSISTED_WORKSPACE_STATE.runState);
+                  setComparisonOptimization((current) => current ? { ...current, stale: true } : null);
+                  setComparisonAhp((current) => current ? { ...current, accepted: false } : null);
+                  setPromethee((current) => current ? { ...current, stale: true } : null);
+                  void listProjectDatasets(activeProjectId!).then(setProjectDatasets).catch(() => undefined);
+                  void getProjectWorkspace(activeProjectId!).then((snapshot) => {
+                    workspaceRevisionRef.current = snapshot.revision;
+                  }).catch(() => undefined);
+                }}
+                onSelectedDateChange={setDatasetExplorerDate}
+                onDatasetExpired={(datasetId) => {
+                  setUploadedDataset((current) => current?.datasetId === datasetId
+                    ? { ...current, status: "expired" }
+                    : current);
+                }}
+                onUseDataset={(datasetId) => {
+                  void activateProjectDataset(activeProjectId!, datasetId)
+                    .then(() => getProjectWorkspace(activeProjectId!))
+                    .then((snapshot) => {
+                      setProjects((current) => current.map((project) => project.project_id === activeProjectId ? { ...project, active_dataset_id: datasetId } : project));
+                      const state = snapshot.state as Partial<PersistedWorkspaceState>;
+                      const selectedDataset = state.dataset
+                        ?? (projectDatasets.find((dataset) => dataset.dataset_id === datasetId)
+                          ? projectDatasetToWorkspace(projectDatasets.find((dataset) => dataset.dataset_id === datasetId)!)
+                          : null);
+                      setUploadedDataset(selectedDataset);
+                      setDatasetExplorerDate(selectedDataset?.startDate ?? null);
+                      setSingleOptimizationRunState(INITIAL_PERSISTED_WORKSPACE_STATE.runState);
+                      setComparisonOptimization((current) => current ? { ...current, stale: true } : null);
+                      setComparisonAhp((current) => current ? { ...current, accepted: false } : null);
+                      setPromethee((current) => current ? { ...current, stale: true } : null);
+                      workspaceRevisionRef.current = snapshot.revision;
+                    })
+                    .catch((error) => setRestoreError(error instanceof Error ? error.message : "Dataset could not be activated."));
+                }}
+                onRemoveDataset={(datasetId) => {
+                  void removeProjectDataset(activeProjectId!, datasetId)
+                    .then(() => listProjectDatasets(activeProjectId!))
+                    .then((datasets) => {
+                      setProjectDatasets(datasets);
+                      if (uploadedDataset?.datasetId === datasetId) {
+                        setProjects((current) => current.map((project) => project.project_id === activeProjectId
+                          ? { ...project, active_dataset_id: null }
+                          : project));
+                        setUploadedDataset(null);
+                        setDatasetExplorerDate(null);
+                        setSingleOptimizationRunState(INITIAL_PERSISTED_WORKSPACE_STATE.runState);
+                        invalidateComparisonScience();
+                      }
+                    })
+                    .catch((error) => setRestoreError(error instanceof Error ? error.message : "Dataset could not be removed."));
+                }}
+              />
             </Suspense>
           ) : activePage === "Dispatch" ? (
             <DispatchStrategyPage
@@ -2710,23 +3785,140 @@ export default function App() {
               onStrategyChange={setWorkspaceDispatchStrategy}
             />
           ) : null}
-          <Box sx={{ display: activePage === "Comparison Mode" ? "block" : "none" }}>
-            <ComparisonModePage
-              dataset={uploadedDataset}
-              dispatchStrategy={workspaceDispatchStrategy}
-              comparisonConfiguration={comparisonConfiguration}
-              comparisonRunState={comparisonRunState}
-              comparisonOptimization={comparisonOptimization}
-              comparisonAhp={comparisonAhp}
-              promethee={promethee}
-              onComparisonConfigurationChange={setComparisonConfiguration}
-              onComparisonRunStateChange={setComparisonRunState}
-              onComparisonCompleted={setComparisonOptimization}
-              onInvalidateScientificState={invalidateComparisonScience}
-              onOpenAHP={openComparisonAHP}
-              onPrometheeChange={setPromethee}
-            />
-          </Box>
+          {activeProject ? <Box sx={{ display: activePage === "Comparison Mode" || activePage === "Results" ? "block" : "none" }}>
+            {applicationRoute.kind === "project" && applicationRoute.surface === "results" ? (
+              <Suspense fallback={<LoadingContent />}>
+                <ProjectResultsPage
+                  projectId={activeProjectId!}
+                  activeDatasetId={uploadedDataset?.datasetId ?? null}
+                  singleRun={singleOptimizationRunState}
+                  comparison={comparisonOptimization}
+                  ahp={comparisonAhp}
+                  promethee={promethee}
+                  onViewSingleRun={() => navigate(projectOptimizationPath(activeProjectId!, singleOptimizationRunState.phase === "ready" ? "optimization" : "single-run"))}
+                  onContinueDecision={() => {
+                    const stage = deriveComparisonDecisionStage({
+                      comparison: comparisonOptimization,
+                      ahp: comparisonAhp,
+                      promethee,
+                      context: { projectId: activeProjectId!, datasetId: uploadedDataset?.datasetId ?? null },
+                      comparisonRunning: ["submitting", "queued", "running", "cancelling"].includes(comparisonRunState.phase),
+                    });
+                    navigate(projectOptimizationPath(activeProjectId!, destinationForComparisonDecisionStage(stage)));
+                  }}
+                  onOpenDetailedDecision={() => navigate(projectOptimizationPath(activeProjectId!, "comparison-results"))}
+                />
+              </Suspense>
+            ) : applicationRoute.kind === "project" && applicationRoute.surface === "comparison-ahp" ? (
+              comparisonOptimization
+              && !comparisonOptimization.stale
+              && comparisonOptimization.projectId === activeProjectId
+              && comparisonOptimization.datasetId === (uploadedDataset?.datasetId ?? null)
+                ? (
+                  <Suspense fallback={<LoadingContent />}>
+                    <ComparisonAHPConfiguration
+                      workspaceState={comparisonAhp}
+                      onWorkspaceStateChange={(state) => {
+                        setComparisonAhp(linkAHPStateToComparison(state, {
+                          projectId: activeProjectId!,
+                          datasetId: uploadedDataset?.datasetId ?? null,
+                          comparisonRevision: comparisonOptimization.revision,
+                        }));
+                        setPromethee((current) => current ? { ...current, stale: true } : current);
+                      }}
+                      onBack={() => navigate(projectOptimizationPath(activeProjectId!, "comparison"))}
+                      onContinue={(state) => {
+                        setComparisonAhp(linkAHPStateToComparison(state, {
+                          projectId: activeProjectId!,
+                          datasetId: uploadedDataset?.datasetId ?? null,
+                          comparisonRevision: comparisonOptimization.revision,
+                        }));
+                        setPromethee(null);
+                        navigate(projectOptimizationPath(activeProjectId!, "comparison-recommendation"));
+                      }}
+                    />
+                  </Suspense>
+                )
+                : (
+                  <Alert
+                    severity="warning"
+                    action={<Button color="inherit" onClick={() => navigate(projectOptimizationPath(activeProjectId!, "comparison"))}>Back to Comparison</Button>}
+                  >
+                    A current completed comparison is required before configuring AHP.
+                  </Alert>
+                )
+            ) : applicationRoute.kind === "project" && applicationRoute.surface === "comparison-recommendation" ? (
+              <Suspense fallback={<LoadingContent />}>
+                <ComparisonRecommendationPage
+                  projectId={activeProjectId!}
+                  datasetId={uploadedDataset?.datasetId ?? null}
+                  comparison={comparisonOptimization}
+                  ahp={comparisonAhp}
+                  promethee={promethee}
+                  onPrometheeChange={(state) => setPromethee(state)}
+                  onBackToSummary={() => navigate(projectOptimizationPath(activeProjectId!, "comparison"))}
+                  onBackToAHP={openComparisonAHP}
+                  onViewDetails={() => navigate(projectOptimizationPath(activeProjectId!, "comparison-results"))}
+                  onReturnDashboard={() => navigate(projectApplicationPath(activeProjectId!))}
+                  onEditComparison={() => navigate(projectOptimizationPath(activeProjectId!, "comparison"))}
+                />
+              </Suspense>
+            ) : applicationRoute.kind === "project" && applicationRoute.surface === "comparison-results" ? (
+              <Suspense fallback={<LoadingContent />}>
+                <ComparisonResultsPage
+                  comparison={comparisonOptimization}
+                  ahp={comparisonAhp}
+                  promethee={promethee}
+                  projectId={activeProjectId!}
+                  datasetId={uploadedDataset?.datasetId ?? null}
+                  onBackToAHP={openComparisonAHP}
+                  onBackToRecommendation={() => navigate(projectOptimizationPath(activeProjectId!, "comparison-recommendation"))}
+                  onBackToSummary={() => navigate(projectOptimizationPath(activeProjectId!, "comparison"))}
+                  onReturnDashboard={() => navigate(projectApplicationPath(activeProjectId!))}
+                />
+              </Suspense>
+            ) : (
+              <ComparisonModePage
+                projectId={activeProjectId!}
+                dataset={uploadedDataset}
+                dispatchStrategy={workspaceDispatchStrategy}
+                comparisonConfiguration={comparisonConfiguration}
+                comparisonRunState={comparisonRunState}
+                comparisonOptimization={comparisonOptimization}
+                comparisonAhp={comparisonAhp}
+                promethee={promethee}
+                onComparisonConfigurationChange={setComparisonConfiguration}
+                onComparisonRunStateChange={setComparisonRunState}
+                onComparisonCompleted={(comparison) => setComparisonOptimization({
+                  ...comparison,
+                  projectId: activeProjectId ?? undefined,
+                  datasetId: uploadedDataset?.datasetId,
+                })}
+                onInvalidateScientificState={invalidateComparisonScience}
+                onOpenAHP={openComparisonAHP}
+                onOpenResults={() => {
+                  const stage = deriveComparisonDecisionStage({
+                    comparison: comparisonOptimization,
+                    ahp: comparisonAhp,
+                    promethee,
+                    context: {
+                      projectId: activeProjectId!,
+                      datasetId: uploadedDataset?.datasetId ?? null,
+                    },
+                  });
+                  navigate(projectOptimizationPath(
+                    activeProjectId!,
+                    destinationForComparisonDecisionStage(stage),
+                  ));
+                }}
+                onOpenDetailedResults={() => navigate(projectOptimizationPath(activeProjectId!, "comparison-results"))}
+                onRunnerClose={() => navigate(projectOptimizationPath(activeProjectId!))}
+                onViewDashboard={() => navigate(projectApplicationPath(activeProjectId!))}
+                startBlockedReason={activeRunMode === "single" ? activeRunMessage : null}
+                onViewActiveRun={openActiveOptimization}
+              />
+            )}
+          </Box> : null}
         </Box>
       </Box>
     </Box>

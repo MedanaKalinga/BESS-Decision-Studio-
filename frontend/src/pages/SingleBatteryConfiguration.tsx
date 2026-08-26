@@ -209,7 +209,7 @@ function ParameterInput({
         p: 1.75,
         borderRadius: "18px",
         borderColor: error ? "#ef9a9a" : active ? "#b7e4dc" : "#dfe6ec",
-        bgcolor: active ? "rgba(240,253,250,0.72)" : "#fff",
+        bgcolor: active ? "rgba(155,239,74,.055)" : "#0D1D2D",
         transition: "border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease",
         "&:focus-within": {
           transform: "translateY(-2px)",
@@ -265,7 +265,7 @@ function ParameterInput({
           },
         }}
         sx={{
-          "& .MuiOutlinedInput-root": { bgcolor: "#fff", borderRadius: "12px" },
+          "& .MuiOutlinedInput-root": { bgcolor: "#081522", borderRadius: "12px" },
           "& .MuiFormHelperText-root": { mx: 0.25, minHeight: 19 },
         }}
       />
@@ -293,7 +293,7 @@ export default function SingleBatteryConfiguration({
   initialConfiguration,
 }: {
   batteryName: string;
-  onBack: () => void;
+  onBack: (configuration?: SingleBatteryConfigurationSnapshot) => void;
   onContinue: (configuration: SingleBatteryConfigurationSnapshot) => void;
   initialConfiguration?: SingleBatteryConfigurationSnapshot | null;
 }) {
@@ -375,6 +375,21 @@ export default function SingleBatteryConfiguration({
     !errors.eta_dis &&
     Number.isFinite(roundTripEfficiency);
 
+  function currentSnapshot(): SingleBatteryConfigurationSnapshot | undefined {
+    if (!catalogueBattery || !values || hasErrors) return undefined;
+    return {
+      catalogueName: catalogueBattery.name,
+      batteryName: effectiveName,
+      priceRsPerKwh: values.price_rs_per_kwh,
+      ratedCycleLife: values.rated_cycle_life,
+      etaCh: values.eta_ch,
+      etaDis: values.eta_dis,
+      weightDensityKgPerKwh: values.weight_density_kg_per_kwh,
+      warrantyYears: values.warranty_years,
+      modifiedFromCatalogue: isModified,
+    };
+  }
+
   const isModified = useMemo(() => {
     if (!catalogueBattery || !draft) {
       return false;
@@ -414,7 +429,7 @@ export default function SingleBatteryConfiguration({
   if (error || !catalogueBattery || !draft || !values) {
     return (
       <Stack spacing={2}>
-        <Button startIcon={<ArrowBackRoundedIcon />} onClick={onBack} sx={{ alignSelf: "flex-start" }}>
+        <Button startIcon={<ArrowBackRoundedIcon />} onClick={() => onBack()} sx={{ alignSelf: "flex-start" }}>
           Back to mode selection
         </Button>
         <Alert
@@ -439,7 +454,7 @@ export default function SingleBatteryConfiguration({
           p: { xs: 2.5, sm: 3.5 },
           borderRadius: "28px",
           color: "#fff",
-          background: "linear-gradient(118deg, #073e49 0%, #08766f 56%, #1669a9 125%)",
+          background: "linear-gradient(118deg,#0D1D2D,#12263A)",
           boxShadow: "0 20px 48px rgba(7,62,73,0.2)",
           "&::after": {
             content: '\"\"',
@@ -458,7 +473,7 @@ export default function SingleBatteryConfiguration({
             color="inherit"
             size="small"
             startIcon={<ArrowBackRoundedIcon />}
-            onClick={onBack}
+            onClick={() => onBack(currentSnapshot())}
             sx={{ mb: 2, bgcolor: "rgba(255,255,255,0.1)", borderRadius: "11px" }}
           >
             Back to mode selection
@@ -472,17 +487,17 @@ export default function SingleBatteryConfiguration({
                 Configure {effectiveName}
               </Typography>
               <Typography sx={{ mt: 1, color: "rgba(255,255,255,0.8)", lineHeight: 1.65 }}>
-                Review catalogue defaults, refine the battery assumptions, and prepare the next setup step. The GA will not run here.
+                Select and edit one battery alternative.
               </Typography>
             </Box>
-            <Chip label="Step 2 - Battery values" sx={{ color: "#fff", bgcolor: "rgba(255,255,255,0.14)", fontWeight: 750 }} />
+            <Chip label="Step 1 · Battery Alternative" sx={{ color: "primary.main", bgcolor: "rgba(155,239,74,.08)", fontWeight: 750 }} />
           </Stack>
         </Box>
       </Paper>
 
       <Paper
         variant="outlined"
-        sx={{ p: { xs: 2, sm: 2.25 }, borderRadius: "20px", borderColor: isModified ? "#f5c26b" : "#cce5df", bgcolor: isModified ? "#fffbeb" : "#f0fdfa" }}
+        sx={{ p: { xs: 2, sm: 2.25 }, borderRadius: "20px", borderColor: isModified ? "warning.main" : "divider", bgcolor: isModified ? "rgba(245,167,66,.06)" : "rgba(155,239,74,.045)" }}
       >
         <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} sx={{ justifyContent: "space-between", alignItems: { sm: "center" } }}>
           <Stack direction="row" spacing={1.25} sx={{ alignItems: "center" }}>
@@ -492,7 +507,7 @@ export default function SingleBatteryConfiguration({
                 {isModified ? "Modified from catalogue default" : "Catalogue values loaded"}
               </Typography>
               <Typography variant="caption" color="text.secondary">
-                Selected catalogue type: {catalogueBattery.name}. Changes remain only in React state.
+                Catalogue: {catalogueBattery.name}. Changes stay local.
               </Typography>
             </Box>
           </Stack>
@@ -510,7 +525,7 @@ export default function SingleBatteryConfiguration({
 
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", xl: "minmax(0, 2fr) minmax(310px, 0.82fr)" }, gap: 2.5, alignItems: "start" }}>
         <Stack spacing={2.5}>
-          <Paper variant="outlined" sx={{ p: { xs: 2, sm: 2.5 }, borderRadius: "22px", borderColor: "#dfe7ec", background: "linear-gradient(135deg, #f8fafc, #f0fdfa)" }}>
+          <Paper variant="outlined" sx={{ p: { xs: 2, sm: 2.5 }, borderRadius: "22px", borderColor: "divider", background: "linear-gradient(135deg,rgba(255,255,255,.02),rgba(155,239,74,.035))" }}>
             <Stack direction="row" spacing={1.25} sx={{ alignItems: "center" }}>
               <Box sx={{ display: "grid", placeItems: "center", width: 42, height: 42, borderRadius: "13px", color: "#0f766e", bgcolor: "#ccfbf1" }}>
                 <BadgeRoundedIcon />
@@ -527,12 +542,12 @@ export default function SingleBatteryConfiguration({
               value={customName}
               onChange={(event) => setCustomName(event.target.value)}
               placeholder={catalogueBattery.name}
-              sx={{ mt: 1.8, maxWidth: 560, "& .MuiOutlinedInput-root": { bgcolor: "#fff", borderRadius: "12px" } }}
+              sx={{ mt: 1.8, maxWidth: 560, "& .MuiOutlinedInput-root": { bgcolor: "#081522", borderRadius: "12px" } }}
             />
           </Paper>
 
           <Paper variant="outlined" sx={{ overflow: "hidden", borderRadius: "24px", borderColor: "#b7e4dc", boxShadow: "0 14px 36px rgba(15,118,110,0.06)" }}>
-            <Box sx={{ p: { xs: 2, sm: 2.5 }, borderBottom: "1px solid #d7eee9", background: "linear-gradient(120deg, #ecfdf5 0%, #f0fdfa 48%, #eff6ff 100%)" }}>
+            <Box sx={{ p: { xs: 2, sm: 2.5 }, borderBottom: "1px solid", borderColor: "divider", background: "linear-gradient(120deg,rgba(155,239,74,.05),rgba(76,141,255,.04))" }}>
               <Stack direction={{ xs: "column", sm: "row" }} spacing={1.2} sx={{ justifyContent: "space-between", alignItems: { sm: "center" } }}>
                 <Stack direction="row" spacing={1.25} sx={{ alignItems: "center" }}>
                   <Box sx={{ display: "grid", placeItems: "center", width: 44, height: 44, borderRadius: "14px", color: "#fff", background: "linear-gradient(135deg, #0f766e, #0ea5a6)" }}>
@@ -540,7 +555,7 @@ export default function SingleBatteryConfiguration({
                   </Box>
                   <Box>
                     <Typography variant="h6">GA-active parameters</Typography>
-                    <Typography variant="body2" color="text.secondary">These four values directly affect the single-battery optimization.</Typography>
+                    <Typography variant="body2" color="text.secondary">Used directly by the single-battery GA.</Typography>
                   </Box>
                 </Stack>
                 <Chip label="Affects GA" size="small" sx={{ alignSelf: { xs: "flex-start", sm: "center" }, bgcolor: "#0f766e", color: "#fff", fontWeight: 800 }} />
@@ -581,11 +596,11 @@ export default function SingleBatteryConfiguration({
           </Paper>
 
           <Paper variant="outlined" sx={{ overflow: "hidden", borderRadius: "24px", borderColor: "#dbe4eb" }}>
-            <Box sx={{ p: { xs: 2, sm: 2.5 }, borderBottom: "1px solid #e4eaf0", background: "linear-gradient(120deg, #f8fafc, #eff6ff)" }}>
+            <Box sx={{ p: { xs: 2, sm: 2.5 }, borderBottom: "1px solid", borderColor: "divider", background: "rgba(76,141,255,.04)" }}>
               <Stack direction={{ xs: "column", sm: "row" }} spacing={1.2} sx={{ justifyContent: "space-between", alignItems: { sm: "center" } }}>
                 <Box>
                   <Typography variant="h6">Additional battery information</Typography>
-                  <Typography variant="body2" color="text.secondary">These values do not currently affect the single GA objective.</Typography>
+                  <Typography variant="body2" color="text.secondary">Not used by the current GA objective.</Typography>
                 </Box>
                 <Chip label="Reference only" size="small" variant="outlined" sx={{ alignSelf: { xs: "flex-start", sm: "center" }, fontWeight: 750 }} />
               </Stack>
@@ -608,7 +623,7 @@ export default function SingleBatteryConfiguration({
         <Paper
           component="aside"
           elevation={0}
-          sx={{ position: { xl: "sticky" }, top: { xl: 92 }, overflow: "hidden", borderRadius: "24px", bgcolor: "#102a36", color: "#fff", boxShadow: "0 20px 48px rgba(15,42,54,0.18)" }}
+          sx={{ position: { xl: "sticky" }, top: { xl: 92 }, overflow: "hidden", borderRadius: "24px", bgcolor: "#081522", border: "1px solid", borderColor: "divider", boxShadow: "0 20px 48px rgba(0,0,0,.2)" }}
         >
           <Box sx={{ p: 2.5, borderBottom: "1px solid rgba(255,255,255,0.09)", background: "linear-gradient(135deg, rgba(20,184,166,0.18), rgba(37,99,235,0.14))" }}>
             <Typography variant="overline" sx={{ color: "#5eead4", fontWeight: 850, letterSpacing: "0.11em" }}>CONFIGURATION SUMMARY</Typography>
@@ -641,23 +656,16 @@ export default function SingleBatteryConfiguration({
               variant="contained"
               endIcon={<ArrowForwardRoundedIcon />}
               disabled={hasErrors}
-              onClick={() => onContinue({
-                catalogueName: catalogueBattery.name,
-                batteryName: effectiveName,
-                priceRsPerKwh: values.price_rs_per_kwh,
-                ratedCycleLife: values.rated_cycle_life,
-                etaCh: values.eta_ch,
-                etaDis: values.eta_dis,
-                weightDensityKgPerKwh: values.weight_density_kg_per_kwh,
-                warrantyYears: values.warranty_years,
-                modifiedFromCatalogue: isModified,
-              })}
+              onClick={() => {
+                const snapshot = currentSnapshot();
+                if (snapshot) onContinue(snapshot);
+              }}
               sx={{ py: 1.25, borderRadius: "13px", background: "linear-gradient(100deg, #14b8a6, #2563eb)", fontWeight: 820 }}
             >
               Continue to Optimization Setup
             </Button>
             <Typography variant="caption" sx={{ display: "block", mt: 1.1, color: "#94a3b8", textAlign: "center" }}>
-              This action stores the draft locally and does not run the GA.
+              Saves locally; does not run the GA.
             </Typography>
           </Box>
         </Paper>

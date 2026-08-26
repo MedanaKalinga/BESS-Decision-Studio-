@@ -11,20 +11,18 @@ class TestAHPService(unittest.TestCase):
         result = calculate_ahp(DEFAULT_AHP_MATRIX)
 
         expected_column_sums = [
-            3.033333333333333,
-            3.5833333333333335,
-            13.0,
-            8.5,
-            9.5,
-            13.0,
+            2.783333333333333,
+            3.0833333333333335,
+            11.0,
+            7.5,
+            12.0,
         ]
         expected_weights = [
-            0.345840266244903,
-            0.2655036781683769,
-            0.07938496931584987,
-            0.11718407351642285,
-            0.11260531893766827,
-            0.07948169381677914,
+            0.37278175835062066,
+            0.3127817583506206,
+            0.09569543958765515,
+            0.13456634642263382,
+            0.08417469728846974,
         ]
 
         for actual, expected in zip(
@@ -36,20 +34,20 @@ class TestAHPService(unittest.TestCase):
         ):
             self.assertAlmostEqual(actual, expected, places=10)
 
-        self.assertEqual(len(result["normalized_matrix"]), 6)
-        for column in range(6):
+        self.assertEqual(len(result["normalized_matrix"]), 5)
+        for column in range(5):
             normalized_column_sum = sum(
                 row[column] for row in result["normalized_matrix"]
             )
             self.assertAlmostEqual(normalized_column_sum, 1.0, places=12)
 
-        self.assertAlmostEqual(result["lambda_max"], 6.124083002113046, places=10)
+        self.assertAlmostEqual(result["lambda_max"], 5.069277703, places=8)
         self.assertAlmostEqual(
-            result["consistency_index"], 0.024816600422609268, places=10
+            result["consistency_index"], 0.017319426, places=8
         )
-        self.assertEqual(result["random_index"], 1.24)
+        self.assertEqual(result["random_index"], 1.12)
         self.assertAlmostEqual(
-            result["consistency_ratio"], 0.02001338743758812, places=10
+            result["consistency_ratio"], 0.015463773, places=8
         )
         self.assertEqual(result["status"], "ACCEPTABLE")
 
@@ -58,7 +56,7 @@ class TestAHPService(unittest.TestCase):
             calculate_ahp([[1.0, 2.0], [0.5]])
 
     def test_perfectly_consistent_matrix_has_near_zero_consistency_ratio(self) -> None:
-        priorities = [9.0, 6.0, 4.0, 3.0, 2.0, 1.0]
+        priorities = [9.0, 6.0, 4.0, 2.0, 1.0]
         matrix = [
             [row_priority / column_priority for column_priority in priorities]
             for row_priority in priorities
@@ -69,7 +67,7 @@ class TestAHPService(unittest.TestCase):
         self.assertAlmostEqual(result["consistency_ratio"], 0.0, places=12)
         self.assertEqual(result["status"], "ACCEPTABLE")
 
-    def test_rejects_square_matrix_that_is_not_six_by_six(self) -> None:
+    def test_rejects_square_matrix_that_is_not_five_by_five(self) -> None:
         with self.assertRaisesRegex(ValueError, "configured criteria"):
             calculate_ahp([[1.0, 1.0], [1.0, 1.0]])
 
@@ -96,7 +94,7 @@ class TestAHPService(unittest.TestCase):
             calculate_ahp(matrix)
 
     def test_marks_inconsistent_matrix_for_review(self) -> None:
-        matrix = [[1.0 for _ in range(6)] for _ in range(6)]
+        matrix = [[1.0 for _ in range(5)] for _ in range(5)]
         matrix[0][1] = 9.0
         matrix[1][0] = 1 / 9
 

@@ -9,11 +9,17 @@ from app.schemas.promethee import PrometheeAlternative
 
 
 CRITERIA_ORDER: tuple[str, ...] = (
+    "total_annual_cost_Rs",
+    "cycle_based_life_years",
+    "round_trip_efficiency",
+    "weight_density_kg_per_kwh",
+    "warranty_years",
+)
+CRITERION_FIELDS: tuple[str, ...] = (
     "total_annual_cost_rs",
     "cycle_based_life_years",
     "round_trip_efficiency",
     "weight_density_kg_per_kwh",
-    "annual_om_cost_rs",
     "warranty_years",
 )
 CRITERION_DIRECTIONS: tuple[str, ...] = (
@@ -21,9 +27,11 @@ CRITERION_DIRECTIONS: tuple[str, ...] = (
     "maximize",
     "maximize",
     "minimize",
-    "minimize",
     "maximize",
 )
+PROMETHEE_Q_RANGE_FRACTION = 0.0
+PROMETHEE_P_RANGE_FRACTION = 0.1
+PROMETHEE_RANGE_EPSILON = 1e-12
 
 
 def _clean(value: float) -> float:
@@ -52,7 +60,7 @@ def type_iii_preference(
 
 def normalize_weights(weights: Sequence[float]) -> list[float]:
     if len(weights) != len(CRITERIA_ORDER):
-        raise ValueError("Exactly six AHP weights are required.")
+        raise ValueError("Exactly five AHP weights are required.")
     converted = [float(weight) for weight in weights]
     if any(not math.isfinite(weight) for weight in converted):
         raise ValueError("AHP weights must be finite numbers.")
@@ -81,7 +89,7 @@ def calculate_promethee(
     feasible = [alternative for alternative in alternatives if alternative.is_feasible]
     excluded = [alternative for alternative in alternatives if not alternative.is_feasible]
     decision_matrix = [
-        [float(getattr(alternative, criterion)) for criterion in CRITERIA_ORDER]
+        [float(getattr(alternative, field)) for field in CRITERION_FIELDS]
         for alternative in feasible
     ]
 
@@ -95,8 +103,19 @@ def calculate_promethee(
     else:
         observed_ranges = [0.0] * len(CRITERIA_ORDER)
 
-    q_thresholds = [0.0] * len(CRITERIA_ORDER)
-    p_thresholds = list(observed_ranges)
+    q_thresholds: list[float] = []
+    p_thresholds: list[float] = []
+    for observed_range in observed_ranges:
+        if observed_range <= PROMETHEE_RANGE_EPSILON:
+            q_thresholds.append(0.0)
+            p_thresholds.append(1.0)
+            continue
+        q_threshold = PROMETHEE_Q_RANGE_FRACTION * observed_range
+        p_threshold = PROMETHEE_P_RANGE_FRACTION * observed_range
+        if p_threshold <= q_threshold:
+            p_threshold = q_threshold + observed_range * 1e-6
+        q_thresholds.append(_clean(q_threshold))
+        p_thresholds.append(_clean(p_threshold))
     feasible_names = [alternative.battery_name for alternative in feasible]
     excluded_payload = [
         {

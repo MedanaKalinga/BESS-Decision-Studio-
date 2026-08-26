@@ -11,6 +11,7 @@ from app.services.single_simulation_service import (
     ModifiedDispatchStrategyError,
     evaluate_uploaded_dataset,
 )
+from app.config.mongodb import PersistenceUnavailableError, mongo_persistence
 
 
 router = APIRouter(prefix="/api/single-optimization", tags=["single-optimization"])
@@ -20,6 +21,13 @@ router = APIRouter(prefix="/api/single-optimization", tags=["single-optimization
 def evaluate_single_optimization(
     request: SingleOptimizationEvaluationRequest,
 ) -> SingleOptimizationEvaluationResponse:
+    if mongo_persistence.available:
+        try:
+            repository = mongo_persistence.repository()
+            if repository.datasets.find_one({"dataset_id": request.dataset_id, "project_id": {"$exists": True}}):
+                raise HTTPException(status_code=404, detail="Dataset was not found.")
+        except PersistenceUnavailableError:
+            pass
     try:
         result = evaluate_uploaded_dataset(
             dataset_id=request.dataset_id,

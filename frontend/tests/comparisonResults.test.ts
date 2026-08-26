@@ -9,6 +9,7 @@ import {
   canEnterComparisonResults,
   isPrometheeResultStale,
   mapComparisonToPrometheeRequest,
+  sanitizePrometheeWorkspaceState,
   shouldPresentRanking,
   shouldPresentRecommendation,
 } from "../src/lib/comparisonResults.ts";
@@ -76,13 +77,13 @@ function comparison() {
 const ahp = {
   matrix: resetAHPMatrix(),
   calculation: {
-    columnSums: [1, 1, 1, 1, 1, 1],
-    normalizedMatrix: Array.from({ length: 6 }, () => Array(6).fill(1 / 6)),
-    weights: [0.3458, 0.2655, 0.0794, 0.1172, 0.1126, 0.0795],
-    lambdaMax: 6.124,
-    consistencyIndex: 0.0248,
-    randomIndex: 1.24,
-    consistencyRatio: 0.0200,
+    columnSums: [1, 1, 1, 1, 1],
+    normalizedMatrix: Array.from({ length: 5 }, () => Array(5).fill(1 / 5)),
+    weights: [0.37278176, 0.31278176, 0.09569544, 0.13456635, 0.08417470],
+    lambdaMax: 5.069277703,
+    consistencyIndex: 0.017319426,
+    randomIndex: 1.12,
+    consistencyRatio: 0.015463773,
     status: "ACCEPTABLE" as const,
   },
   accepted: true,
@@ -95,12 +96,12 @@ function prometheeResult() {
     scientific_status: "ranking_completed" as const,
     accepted_ahp_revision: 4,
     criteria_order: [...PROMETHEE_CRITERIA_ORDER],
-    criterion_directions: ["minimize", "maximize", "maximize", "minimize", "minimize", "maximize"] as const,
+    criterion_directions: ["minimize", "maximize", "maximize", "minimize", "maximize"] as const,
     normalized_weights: [...ahp.calculation.weights],
-    raw_decision_matrix: [[150_000_000, 8.3, 0.8464, 8.5, 1_496_000, 5], [160_000_000, 8.3, 0.8464, 8.5, 1_496_000, 5]],
-    observed_ranges: [10_000_000, 0, 0, 0, 0, 0],
-    q_thresholds: [0, 0, 0, 0, 0, 0],
-    p_thresholds: [10_000_000, 0, 0, 0, 0, 0],
+    raw_decision_matrix: [[150_000_000, 8.3, 0.8464, 8.5, 5], [160_000_000, 8.3, 0.8464, 8.5, 5]],
+    observed_ranges: [10_000_000, 0, 0, 0, 0],
+    q_thresholds: [0, 0, 0, 0, 0],
+    p_thresholds: [1_000_000, 1, 1, 1, 1],
     feasible_alternative_names: ["A", "B"],
     excluded_alternatives: [{ battery_name: "Excluded", solution_status: "no_feasible_candidate" as const, failed_constraints: ["peak_support"] }],
     criterion_preference_matrices: {},
@@ -116,35 +117,27 @@ function prometheeResult() {
   };
 }
 
-test("Stage 1 maps exact criteria, accepted weights, and infeasible alternatives", () => {
+test("Stage 1 maps exact criteria, accepted weights, and feasible alternatives only", () => {
   const request = mapComparisonToPrometheeRequest(comparison(), ahp);
   assert.deepEqual(PROMETHEE_CRITERIA_ORDER, [
-    "total_annual_cost_rs",
+    "total_annual_cost_Rs",
     "cycle_based_life_years",
     "round_trip_efficiency",
     "weight_density_kg_per_kwh",
-    "annual_om_cost_rs",
     "warranty_years",
   ]);
   assert.deepEqual(request.ahp_weights, ahp.calculation.weights);
   assert.equal(request.accepted_ahp_revision, 4);
+  assert.equal(request.alternatives.length, 2);
+  assert.ok(request.alternatives.every((alternative) => alternative.is_feasible));
   assert.equal(request.alternatives[0].total_annual_cost_rs, 150_000_000);
-  assert.deepEqual(request.alternatives[2], {
-    battery_name: "Excluded",
-    solution_status: "no_feasible_candidate",
-    failed_constraints: ["peak_support"],
-    is_feasible: false,
-    total_annual_cost_rs: 160_000_000,
-    cycle_based_life_years: 8.3,
-    round_trip_efficiency: 0.8464,
-    weight_density_kg_per_kwh: 8.5,
-    annual_om_cost_rs: 1_496_000,
-    warranty_years: 5,
-  });
+  assert.equal("annual_om_cost_rs" in request.alternatives[0], false);
+  assert.equal(request.alternatives.some((alternative) => alternative.battery_name === "Excluded"), false);
 });
 
 test("scientific status controls recommendation and ranking presentation", () => {
   assert.equal(shouldPresentRecommendation("ranking_completed", "A", false), true);
+  assert.equal(shouldPresentRecommendation("ranking_completed", "A", true), false);
   assert.equal(shouldPresentRecommendation("insufficient_feasible_alternatives", null, false), false);
   assert.equal(shouldPresentRecommendation("no_feasible_alternatives", null, false), false);
   assert.equal(shouldPresentRanking("ranking_completed"), true);
@@ -172,6 +165,30 @@ test("AHP or comparison revision changes mark a saved result stale", () => {
   assert.equal(isPrometheeResultStale(saved, { ...comparisonState, revision: "changed" }, ahp), true);
 });
 
+test("legacy six-criterion PROMETHEE state is preserved as stale and incompatible", () => {
+  const current = comparison();
+  const legacy = sanitizePrometheeWorkspaceState({
+    result: {
+      ...prometheeResult(),
+      criteria_order: [
+        "total_annual_cost_rs",
+        "cycle_based_life_years",
+        "round_trip_efficiency",
+        "weight_density_kg_per_kwh",
+        "annual_om_cost_rs",
+        "warranty_years",
+      ],
+    },
+    comparisonRevision: current.revision,
+    batteryConfigurationSignature: current.batteryConfigurationSignature,
+    ahpRevision: 4,
+    calculatedAt: "2026-01-01T00:00:00.000Z",
+  });
+  assert.equal(legacy?.stale, true);
+  assert.equal(legacy?.incompatible, true);
+  assert.match(legacy?.incompatibilityReason ?? "", /six-criterion model/);
+});
+
 test("closing does not mutate workspace and refresh restores valid ranking", () => {
   const values = new Map<string, string>();
   const storage = {
@@ -186,6 +203,9 @@ test("closing does not mutate workspace and refresh restores valid ranking", () 
     batteryConfigurationSignature: comparisonState.batteryConfigurationSignature,
     ahpRevision: ahp.revision,
     calculatedAt: "2026-07-14T10:10:00.000Z",
+    scientificConfigurationVersion: 3,
+    incompatible: false,
+    incompatibilityReason: null,
   };
   const workspace = {
     version: 1,

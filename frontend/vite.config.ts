@@ -4,6 +4,10 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
+  build: {
+    // Avoid retaining duplicate compressed bundle buffers in constrained local builds.
+    reportCompressedSize: false,
+  },
   server: {
     proxy: {
       "/api": {

@@ -1,4 +1,4 @@
-import { AHP_CRITERIA } from "./comparisonAhp.ts";
+import { AHP_CRITERIA, SCIENTIFIC_CONFIGURATION_VERSION } from "./comparisonAhp.ts";
 import type {
   ComparisonAHPWorkspaceState,
   ComparisonBatteryResult,
@@ -23,7 +23,6 @@ export interface PrometheeRequestAlternative {
   cycle_based_life_years: number;
   round_trip_efficiency: number;
   weight_density_kg_per_kwh: number;
-  annual_om_cost_rs: number;
   warranty_years: number;
 }
 
@@ -31,6 +30,32 @@ export interface PrometheeCalculationRequest {
   alternatives: PrometheeRequestAlternative[];
   ahp_weights: number[];
   accepted_ahp_revision: number;
+}
+
+export interface ComparisonScientificContext {
+  projectId: string;
+  datasetId: string | null;
+}
+
+export interface PrometheeCalculationOptions {
+  comparison: ComparisonOptimizationWorkspaceState;
+  ahp: ComparisonAHPWorkspaceState;
+  context: ComparisonScientificContext;
+  signal?: AbortSignal;
+  fetcher?: typeof fetch;
+}
+
+export function buildPrometheeWorkflowHeaders(
+  context: ComparisonScientificContext,
+  comparisonRevision: string,
+  ahpRevision: number,
+): Record<string, string> {
+  return {
+    "X-Project-ID": context.projectId,
+    "X-Dataset-ID": context.datasetId ?? "",
+    "X-Comparison-Revision": comparisonRevision,
+    "X-AHP-Revision": String(ahpRevision),
+  };
 }
 
 function finite(value: unknown): value is number {
@@ -124,11 +149,13 @@ export function mapComparisonToPrometheeRequest(
   if (!ahp.accepted || ahp.calculation?.status !== "ACCEPTABLE") {
     throw new Error("Accepted, consistent AHP weights are required.");
   }
-  if (!finiteArray(ahp.calculation.weights, 6)) {
-    throw new Error("The accepted AHP result does not contain six finite weights.");
+  if (!finiteArray(ahp.calculation.weights, AHP_CRITERIA.length)) {
+    throw new Error("The accepted AHP result does not contain five finite weights.");
   }
 
-  const alternatives = comparison.finalResult.battery_results.map((battery) => {
+  const alternatives = comparison.finalResult.battery_results
+    .filter((battery) => battery.is_feasible)
+    .map((battery) => {
     if (!isValidComparisonBatteryResult(battery)) {
       throw new Error("A comparison battery result is malformed.");
     }
@@ -141,10 +168,12 @@ export function mapComparisonToPrometheeRequest(
       cycle_based_life_years: battery.cycle_based_life_years,
       round_trip_efficiency: battery.round_trip_efficiency,
       weight_density_kg_per_kwh: battery.weight_density_kg_per_kwh,
-      annual_om_cost_rs: battery.annual_om_cost_rs,
       warranty_years: battery.warranty_years,
     } satisfies PrometheeRequestAlternative;
   });
+  if (alternatives.length < 2) {
+    throw new Error("At least two feasible GA-optimized alternatives are required.");
+  }
   return {
     alternatives,
     ahp_weights: [...ahp.calculation.weights],
@@ -152,38 +181,139 @@ export function mapComparisonToPrometheeRequest(
   };
 }
 
+export async function calculatePrometheeRanking({
+  comparison,
+  ahp,
+  context,
+  signal,
+  fetcher = fetch,
+}: PrometheeCalculationOptions): Promise<PrometheeWorkspaceState> {
+  const response = await fetcher("/api/promethee/calculate", {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      ...buildPrometheeWorkflowHeaders(context, comparison.revision, ahp.revision),
+    },
+    body: JSON.stringify(mapComparisonToPrometheeRequest(comparison, ahp)),
+    signal,
+  });
+  const payload: unknown = await response.json().catch(() => null);
+  if (!response.ok) {
+    const detail = payload && typeof payload === "object" && "detail" in payload
+      ? String((payload as { detail: unknown }).detail)
+      : `PROMETHEE backend returned HTTP ${response.status}.`;
+    throw new Error(`Final ranking failed (HTTP ${response.status}): ${detail}`);
+  }
+  if (!isValidPrometheeCalculationResult(payload)) {
+    throw new Error("The PROMETHEE backend returned an invalid result contract.");
+  }
+  return {
+    result: payload,
+    comparisonRevision: comparison.revision,
+    batteryConfigurationSignature: comparison.batteryConfigurationSignature,
+    ahpRevision: ahp.revision,
+    calculatedAt: new Date().toISOString(),
+    projectId: context.projectId,
+    datasetId: context.datasetId,
+    scientificConfigurationVersion: SCIENTIFIC_CONFIGURATION_VERSION,
+    incompatible: false,
+    incompatibilityReason: null,
+  };
+}
+
+export function isComparisonCurrent(
+  comparison: ComparisonOptimizationWorkspaceState | null,
+  context?: ComparisonScientificContext,
+): boolean {
+  if (comparison?.status !== "completed" || comparison.stale) return false;
+  if (!context) return true;
+  return comparison.projectId === context.projectId
+    && comparison.datasetId === context.datasetId;
+}
+
+export function isAHPCurrent(
+  ahp: ComparisonAHPWorkspaceState | null,
+  comparison: ComparisonOptimizationWorkspaceState | null,
+  context?: ComparisonScientificContext,
+): boolean {
+  if (!ahp?.accepted || ahp.incompatible
+    || (ahp.scientificConfigurationVersion !== undefined
+      && ahp.scientificConfigurationVersion !== SCIENTIFIC_CONFIGURATION_VERSION)
+    || ahp.calculation?.status !== "ACCEPTABLE" || !comparison) return false;
+  if (ahp.linkedComparisonRevision !== undefined
+    && ahp.linkedComparisonRevision !== comparison.revision) return false;
+  if (!context) return true;
+  return ahp.projectId === context.projectId
+    && ahp.linkedDatasetId === context.datasetId
+    && ahp.linkedComparisonRevision === comparison.revision;
+}
+
 export function hasPrometheePrerequisites(
   comparison: ComparisonOptimizationWorkspaceState | null,
   ahp: ComparisonAHPWorkspaceState | null,
+  context?: ComparisonScientificContext,
 ): boolean {
-  return Boolean(
-    comparison?.status === "completed"
-    && !comparison.stale
-    && comparison.finalResult.battery_results.filter((battery) => battery.is_feasible).length >= 2
-    && ahp?.accepted
-    && ahp.calculation?.status === "ACCEPTABLE"
-    && ahp.calculation.weights.length === 6,
-  );
+  if (!isComparisonCurrent(comparison, context)
+    || !comparison
+    || !isAHPCurrent(ahp, comparison, context)
+    || !ahp?.calculation) return false;
+  return comparison.finalResult.battery_results.filter((battery) => battery.is_feasible).length >= 2
+    && ahp.calculation.weights.length === AHP_CRITERIA.length;
 }
 
 export function canEnterComparisonResults(
   comparison: ComparisonOptimizationWorkspaceState | null,
   ahp: ComparisonAHPWorkspaceState | null,
+  context?: ComparisonScientificContext,
 ): boolean {
-  return hasPrometheePrerequisites(comparison, ahp);
+  return isComparisonCurrent(comparison, context)
+    && isAHPCurrent(ahp, comparison, context);
+}
+
+export function comparisonRankingEligibility(
+  comparison: ComparisonOptimizationWorkspaceState | null,
+): "ranking_ready" | "insufficient_feasible_alternatives" | "no_feasible_alternatives" {
+  const feasibleCount = comparison?.finalResult.battery_results.filter(
+    (battery) => battery.is_feasible,
+  ).length ?? 0;
+  if (feasibleCount === 0) return "no_feasible_alternatives";
+  if (feasibleCount === 1) return "insufficient_feasible_alternatives";
+  return "ranking_ready";
 }
 
 export function isPrometheeResultStale(
   state: PrometheeWorkspaceState | null,
   comparison: ComparisonOptimizationWorkspaceState | null,
   ahp: ComparisonAHPWorkspaceState | null,
+  context?: ComparisonScientificContext,
 ): boolean {
   if (!state) return false;
-  if (!comparison || !ahp?.accepted) return true;
-  return comparison.stale
-    || state.comparisonRevision !== comparison.revision
+  if (state.incompatible
+    || (state.scientificConfigurationVersion !== undefined
+      && state.scientificConfigurationVersion !== SCIENTIFIC_CONFIGURATION_VERSION)) return true;
+  if (!isComparisonCurrent(comparison, context) || !isAHPCurrent(ahp, comparison, context)) return true;
+  if (!comparison || !ahp) return true;
+  return Boolean(
+    state.comparisonRevision !== comparison.revision
     || state.batteryConfigurationSignature !== comparison.batteryConfigurationSignature
-    || state.ahpRevision !== ahp.revision;
+    || state.ahpRevision !== ahp.revision
+    || (context && (
+      state.projectId !== context.projectId
+      || state.datasetId !== context.datasetId
+    )),
+  );
+}
+
+export function findRecommendedStageOneResult(
+  result: PrometheeCalculationResult | null,
+  comparison: ComparisonOptimizationWorkspaceState | null,
+): ComparisonBatteryResult | null {
+  if (!result?.recommended_battery || !comparison) return null;
+  return comparison.finalResult.battery_results.find(
+    (battery) => battery.is_feasible && battery.battery_name === result.recommended_battery,
+  ) ?? null;
 }
 
 export function shouldPresentRecommendation(
@@ -205,17 +335,22 @@ export function isValidPrometheeCalculationResult(value: unknown): value is Prom
     || result.scientific_status === "insufficient_feasible_alternatives"
     || result.scientific_status === "no_feasible_alternatives";
   const matricesValid = Array.isArray(result.raw_decision_matrix)
-    && result.raw_decision_matrix.every((row) => finiteArray(row, 6))
+    && result.raw_decision_matrix.every((row) => finiteArray(row, AHP_CRITERIA.length))
     && Array.isArray(result.aggregated_preference_matrix)
     && result.aggregated_preference_matrix.every((row) => finiteArray(row));
   return validStatus
     && JSON.stringify(result.criteria_order) === JSON.stringify(PROMETHEE_CRITERIA_ORDER)
     && JSON.stringify(result.criterion_directions) === JSON.stringify(PROMETHEE_CRITERION_DIRECTIONS)
-    && finiteArray(result.normalized_weights, 6)
-    && finiteArray(result.observed_ranges, 6)
-    && finiteArray(result.q_thresholds, 6)
+    && finiteArray(result.normalized_weights, AHP_CRITERIA.length)
+    && finiteArray(result.observed_ranges, AHP_CRITERIA.length)
+    && finiteArray(result.q_thresholds, AHP_CRITERIA.length)
     && result.q_thresholds.every((threshold) => threshold === 0)
-    && finiteArray(result.p_thresholds, 6)
+    && finiteArray(result.p_thresholds, AHP_CRITERIA.length)
+    && result.p_thresholds.every((threshold, index) => {
+      const observedRange = result.observed_ranges[index];
+      const expected = observedRange <= 1e-12 ? 1 : observedRange * 0.1;
+      return Math.abs(threshold - expected) <= Math.max(1e-10, Math.abs(expected) * 1e-8);
+    })
     && matricesValid
     && finiteArray(result.positive_flows)
     && finiteArray(result.negative_flows)
@@ -243,10 +378,33 @@ export function sanitizeComparisonOptimizationState(
 export function sanitizePrometheeWorkspaceState(value: unknown): PrometheeWorkspaceState | null {
   if (!value || typeof value !== "object") return null;
   const state = value as PrometheeWorkspaceState;
-  if (!isValidPrometheeCalculationResult(state.result)) return null;
+  const rawResult: unknown = (value as { result?: unknown }).result;
   if (typeof state.comparisonRevision !== "string"
     || typeof state.batteryConfigurationSignature !== "string"
     || !Number.isInteger(state.ahpRevision)
     || typeof state.calculatedAt !== "string") return null;
-  return state;
+  if (isValidPrometheeCalculationResult(rawResult)) {
+    return {
+      ...state,
+      scientificConfigurationVersion: SCIENTIFIC_CONFIGURATION_VERSION,
+      incompatible: false,
+      incompatibilityReason: null,
+    };
+  }
+  const legacyCriteria = rawResult && typeof rawResult === "object"
+    ? (rawResult as { criteria_order?: unknown }).criteria_order
+    : null;
+  if (Array.isArray(legacyCriteria)
+    && legacyCriteria.length === 6
+    && legacyCriteria.includes("annual_om_cost_rs")) {
+    return {
+      ...state,
+      stale: true,
+      scientificConfigurationVersion: state.scientificConfigurationVersion ?? 2,
+      incompatible: true,
+      incompatibilityReason:
+        "The saved ranking uses the previous six-criterion model and must be recalculated.",
+    };
+  }
+  return null;
 }

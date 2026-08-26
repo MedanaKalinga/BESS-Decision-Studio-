@@ -2,9 +2,12 @@ import unittest
 
 from app.api.configuration import get_default_configuration
 from app.config.defaults import (
+    DEFAULT_AHP_MATRIX,
+    DEFAULT_BATTERY_TYPES,
     DEFAULT_CRITERIA,
     DEFAULT_DISPATCH_PERIODS,
     PV_NOT_DISPATCHED_WARNING,
+    SCIENTIFIC_CONFIGURATION_VERSION,
 )
 
 
@@ -13,13 +16,41 @@ class TestDefaultConfiguration(unittest.TestCase):
         self.assertEqual(
             DEFAULT_CRITERIA,
             [
-                {"name": "total_annual_cost_rs", "direction": "minimize"},
+                {"name": "total_annual_cost_Rs", "direction": "minimize"},
                 {"name": "cycle_based_life_years", "direction": "maximize"},
                 {"name": "round_trip_efficiency", "direction": "maximize"},
                 {"name": "weight_density_kg_per_kwh", "direction": "minimize"},
-                {"name": "annual_om_cost_rs", "direction": "minimize"},
                 {"name": "warranty_years", "direction": "maximize"},
             ],
+        )
+
+    def test_battery_catalogue_matches_v3_reference(self) -> None:
+        self.assertEqual(
+            DEFAULT_BATTERY_TYPES,
+            [
+                {"name": "Low-cost", "price_rs_per_kwh": 45000, "rated_cycle_life": 5000, "eta_ch": 0.92, "eta_dis": 0.92, "weight_density_kg_per_kwh": 10.0, "warranty_years": 10.0},
+                {"name": "Medium-low", "price_rs_per_kwh": 55000, "rated_cycle_life": 6500, "eta_ch": 0.935, "eta_dis": 0.935, "weight_density_kg_per_kwh": 8.5, "warranty_years": 10.0},
+                {"name": "Medium", "price_rs_per_kwh": 65000, "rated_cycle_life": 8000, "eta_ch": 0.95, "eta_dis": 0.95, "weight_density_kg_per_kwh": 8.0, "warranty_years": 12.0},
+                {"name": "High", "price_rs_per_kwh": 75000, "rated_cycle_life": 9500, "eta_ch": 0.96, "eta_dis": 0.96, "weight_density_kg_per_kwh": 8.0, "warranty_years": 15.0},
+            ],
+        )
+        self.assertNotIn("Medium-high", {item["name"] for item in DEFAULT_BATTERY_TYPES})
+
+    def test_default_ahp_matrix_and_configuration_version_match_v3(self) -> None:
+        self.assertEqual(
+            DEFAULT_AHP_MATRIX,
+            [
+                [1.0, 1.0, 4.0, 3.0, 5.0],
+                [1.0, 1.0, 4.0, 2.0, 3.0],
+                [0.25, 0.25, 1.0, 1.0, 1.0],
+                [1 / 3, 0.5, 1.0, 1.0, 2.0],
+                [0.2, 1 / 3, 1.0, 0.5, 1.0],
+            ],
+        )
+        self.assertEqual(SCIENTIFIC_CONFIGURATION_VERSION, 3)
+        self.assertEqual(
+            get_default_configuration()["scientific_configuration_version"],
+            3,
         )
 
     def test_configuration_endpoint_includes_dispatch_periods(self) -> None:

@@ -16,6 +16,8 @@ import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
 import CloudDoneRoundedIcon from "@mui/icons-material/CloudDoneRounded";
 import CloudUploadRoundedIcon from "@mui/icons-material/CloudUploadRounded";
 import DownloadRoundedIcon from "@mui/icons-material/DownloadRounded";
+import DeleteOutlineRoundedIcon from "@mui/icons-material/DeleteOutlineRounded";
+import ExpandMoreRoundedIcon from "@mui/icons-material/ExpandMoreRounded";
 import ElectricCarRoundedIcon from "@mui/icons-material/ElectricCarRounded";
 import ErrorOutlineRoundedIcon from "@mui/icons-material/ErrorOutlineRounded";
 import InsertDriveFileRoundedIcon from "@mui/icons-material/InsertDriveFileRounded";
@@ -33,6 +35,11 @@ import {
   Checkbox,
   Chip,
   CircularProgress,
+  Collapse,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   FormControl,
   FormControlLabel,
   InputLabel,
@@ -47,6 +54,14 @@ import {
 } from "@mui/material";
 import type { SvgIconComponent } from "@mui/icons-material";
 import type { WorkspaceDatasetSummary } from "../types/workspace";
+import {
+  DATASET_EXPIRED_MESSAGE,
+  DatasetExpiredError,
+  fetchDatasetDay,
+  resolveDatasetExplorerDate,
+} from "../lib/datasetWorkspace";
+import type { DatasetDayPoint, DatasetDayResponse } from "../lib/datasetWorkspace";
+import { PageHeader, StatusChip, SurfaceCard } from "../components/ui";
 
 
 interface ValidationIssue {
@@ -84,28 +99,6 @@ interface DatasetUploadResponse {
     ev_peak_kw: number;
     start_date: string;
     end_date: string;
-  };
-}
-
-interface DatasetDayPoint {
-  timestamp: string;
-  pv_kw: number;
-  ev_kw: number;
-  tariff_rs_per_kwh: number | null;
-}
-
-interface DatasetDayResponse {
-  dataset_id: string;
-  date: string;
-  interval_minutes: number;
-  points: DatasetDayPoint[];
-  summary: {
-    pv_energy_kwh: number;
-    ev_energy_kwh: number;
-    surplus_energy_kwh: number;
-    deficit_energy_kwh: number;
-    pv_peak_kw: number;
-    ev_peak_kw: number;
   };
 }
 
@@ -250,17 +243,6 @@ function uploadErrorMessages(payload: unknown, status: number): string[] {
   return [typeof message === "string" ? message : `Upload failed with HTTP ${status}.`];
 }
 
-function responseErrorMessage(payload: unknown, fallback: string): string {
-  if (!payload || typeof payload !== "object") {
-    return fallback;
-  }
-  const detail = (payload as { detail?: unknown }).detail;
-  if (typeof detail === "string") {
-    return detail;
-  }
-  return fallback;
-}
-
 function isUploadResponse(value: unknown): value is DatasetUploadResponse {
   if (!value || typeof value !== "object") {
     return false;
@@ -271,14 +253,6 @@ function isUploadResponse(value: unknown): value is DatasetUploadResponse {
     Boolean(candidate.summary) &&
     Boolean(candidate.validation_summary)
   );
-}
-
-function isDayResponse(value: unknown): value is DatasetDayResponse {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-  const candidate = value as Partial<DatasetDayResponse>;
-  return Array.isArray(candidate.points) && Boolean(candidate.summary);
 }
 
 function MetricCard({
@@ -355,8 +329,8 @@ function CombinedStepChart({ points }: { points: DatasetDayPoint[] }) {
   const padding = { top: 26, right: 22, bottom: 44, left: 66 };
   const plotWidth = width - padding.left - padding.right;
   const plotHeight = height - padding.top - padding.bottom;
-  const pvColor = "#d97706";
-  const evColor = "#2563eb";
+  const pvColor = "#9BEF4A";
+  const evColor = "#4C8DFF";
   const pvValues = useMemo(() => points.map((point) => point.pv_kw), [points]);
   const evValues = useMemo(() => points.map((point) => point.ev_kw), [points]);
   const scaleMax = Math.max(1, ...pvValues, ...evValues);
@@ -445,9 +419,9 @@ function CombinedStepChart({ points }: { points: DatasetDayPoint[] }) {
         position: "relative",
         overflow: "hidden",
         borderRadius: "24px",
-        borderColor: "#dfe7ee",
-        background: "#fff",
-        boxShadow: "0 16px 42px rgba(31, 49, 73, 0.07)",
+        borderColor: "divider",
+        background: "#0D1D2D",
+        boxShadow: "0 16px 42px rgba(0,0,0,.2)",
         "& .combined-series, & .balance-band": {
           transition: "opacity 220ms ease",
         },
@@ -460,8 +434,9 @@ function CombinedStepChart({ points }: { points: DatasetDayPoint[] }) {
         sx={{
           px: { xs: 2, sm: 2.75 },
           py: { xs: 2, sm: 2.35 },
-          borderBottom: "1px solid #e6edf3",
-          background: "linear-gradient(120deg, #f0fdfa 0%, #f8fafc 48%, #eff6ff 100%)",
+          borderBottom: "1px solid",
+          borderColor: "divider",
+          background: "linear-gradient(120deg, rgba(155,239,74,.06), rgba(76,141,255,.05))",
         }}
       >
         <Stack
@@ -474,7 +449,7 @@ function CombinedStepChart({ points }: { points: DatasetDayPoint[] }) {
               Combined PV and EV Profile
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 0.35 }}>
-              Compare generation and demand on one shared power scale across all 15-minute intervals.
+              PV and EV on one 15-minute power scale.
             </Typography>
           </Box>
           <Stack
@@ -493,11 +468,10 @@ function CombinedStepChart({ points }: { points: DatasetDayPoint[] }) {
               sx={{
                 borderRadius: "999px",
                 px: 1.35,
-                color: showPv ? "#92400e" : "#64748b",
-                bgcolor: showPv ? "#fffbeb" : "rgba(255,255,255,0.72)",
+                color: showPv ? "primary.main" : "text.secondary",
+                bgcolor: showPv ? "rgba(155,239,74,.08)" : "rgba(255,255,255,.03)",
                 border: "1px solid",
-                borderColor: showPv ? "#fcd34d" : "#d9e1e8",
-                "&:hover": { bgcolor: showPv ? "#fef3c7" : "#f8fafc" },
+                borderColor: showPv ? "rgba(155,239,74,.42)" : "divider",
               }}
             >
               PV generation
@@ -512,11 +486,10 @@ function CombinedStepChart({ points }: { points: DatasetDayPoint[] }) {
               sx={{
                 borderRadius: "999px",
                 px: 1.35,
-                color: showEv ? "#1d4ed8" : "#64748b",
-                bgcolor: showEv ? "#eff6ff" : "rgba(255,255,255,0.72)",
+                color: showEv ? "secondary.main" : "text.secondary",
+                bgcolor: showEv ? "rgba(76,141,255,.09)" : "rgba(255,255,255,.03)",
                 border: "1px solid",
-                borderColor: showEv ? "#93c5fd" : "#d9e1e8",
-                "&:hover": { bgcolor: showEv ? "#dbeafe" : "#f8fafc" },
+                borderColor: showEv ? "rgba(76,141,255,.42)" : "divider",
               }}
             >
               EV demand
@@ -573,7 +546,7 @@ function CombinedStepChart({ points }: { points: DatasetDayPoint[] }) {
               width={plotWidth}
               height={plotHeight}
               rx="12"
-              fill="#fbfdff"
+              fill="#081522"
             />
             {[0, 0.25, 0.5, 0.75, 1].map((fraction) => {
               const gridY = padding.top + fraction * plotHeight;
@@ -585,7 +558,7 @@ function CombinedStepChart({ points }: { points: DatasetDayPoint[] }) {
                     x2={width - padding.right}
                     y1={gridY}
                     y2={gridY}
-                    stroke="#e4eaf0"
+                    stroke="#20364A"
                     strokeDasharray="4 6"
                   />
                   <text
@@ -593,7 +566,7 @@ function CombinedStepChart({ points }: { points: DatasetDayPoint[] }) {
                     y={gridY + 4}
                     textAnchor="end"
                     fontSize="11"
-                    fill="#718096"
+                    fill="#94A6BA"
                   >
                     {compactFormatter.format(labelValue)}
                   </text>
@@ -607,7 +580,7 @@ function CombinedStepChart({ points }: { points: DatasetDayPoint[] }) {
               textAnchor="middle"
               fontSize="11"
               fontWeight="700"
-              fill="#64748b"
+              fill="#94A6BA"
             >
               Power (kW)
             </text>
@@ -618,7 +591,7 @@ function CombinedStepChart({ points }: { points: DatasetDayPoint[] }) {
                 y={height - 13}
                 textAnchor={index === 0 ? "start" : index === points.length - 1 ? "end" : "middle"}
                 fontSize="11"
-                fill="#718096"
+                fill="#94A6BA"
               >
                 {points[index] ? formatTimestampTime(points[index].timestamp) : ""}
               </text>
@@ -761,10 +734,28 @@ function CombinedStepChart({ points }: { points: DatasetDayPoint[] }) {
 }
 
 interface DataUploadPageProps {
+  projectId: string;
+  dataset: WorkspaceDatasetSummary | null;
+  projectDatasets?: Array<{ dataset_id: string; filename: string; uploaded_at: string; row_count: number; start_date: string; end_date: string; status: string }>;
+  selectedDate: string | null;
   onDatasetUploaded?: (dataset: WorkspaceDatasetSummary) => void;
+  onSelectedDateChange: (date: string | null) => void;
+  onDatasetExpired: (datasetId: string) => void;
+  onUseDataset?: (datasetId: string) => void;
+  onRemoveDataset?: (datasetId: string) => void;
 }
 
-export default function DataUploadPage({ onDatasetUploaded }: DataUploadPageProps) {
+export default function DataUploadPage({
+  projectId,
+  dataset,
+  projectDatasets = [],
+  selectedDate,
+  onDatasetUploaded,
+  onSelectedDateChange,
+  onDatasetExpired,
+  onUseDataset,
+  onRemoveDataset,
+}: DataUploadPageProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const activeRequestRef = useRef<XMLHttpRequest | null>(null);
   const headerReadSequenceRef = useRef(0);
@@ -782,11 +773,11 @@ export default function DataUploadPage({ onDatasetUploaded }: DataUploadPageProp
   const [uploadPhase, setUploadPhase] = useState<UploadPhase>("idle");
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadErrors, setUploadErrors] = useState<string[]>([]);
-  const [uploadResult, setUploadResult] = useState<DatasetUploadResponse | null>(null);
-  const [selectedDate, setSelectedDate] = useState("");
   const [dayResult, setDayResult] = useState<DatasetDayResponse | null>(null);
   const [dayLoading, setDayLoading] = useState(false);
   const [dayError, setDayError] = useState<string | null>(null);
+  const [projectDatasetsOpen, setProjectDatasetsOpen] = useState(false);
+  const [removeTarget, setRemoveTarget] = useState<string | null>(null);
 
   useEffect(
     () => () => {
@@ -796,35 +787,29 @@ export default function DataUploadPage({ onDatasetUploaded }: DataUploadPageProp
   );
 
   useEffect(() => {
-    if (!uploadResult || !selectedDate) {
+    const resolvedDate = resolveDatasetExplorerDate(dataset, selectedDate);
+    if (resolvedDate !== selectedDate) onSelectedDateChange(resolvedDate);
+  }, [dataset, onSelectedDateChange, selectedDate]);
+
+  useEffect(() => {
+    if (!dataset || dataset.status === "expired" || !selectedDate) {
       setDayResult(null);
       return;
     }
 
     const controller = new AbortController();
-    const datasetId = uploadResult.dataset_id;
+    const datasetId = dataset.datasetId;
+    const dayDate = selectedDate;
 
     async function loadDay() {
       setDayLoading(true);
       setDayError(null);
       try {
-        const response = await fetch(
-          `/api/datasets/${encodeURIComponent(datasetId)}/day?date=${encodeURIComponent(selectedDate)}`,
-          { headers: { Accept: "application/json" }, signal: controller.signal },
-        );
-        const payload: unknown = await response.json().catch(() => null);
-        if (!response.ok) {
-          throw new Error(
-            responseErrorMessage(payload, `Day data request failed with HTTP ${response.status}.`),
-          );
-        }
-        if (!isDayResponse(payload)) {
-          throw new Error("The backend returned an unexpected day-data format.");
-        }
-        setDayResult(payload);
+        setDayResult(await fetchDatasetDay(datasetId, dayDate, controller.signal, fetch, projectId));
       } catch (error) {
         if (!controller.signal.aborted) {
           setDayResult(null);
+          if (error instanceof DatasetExpiredError) onDatasetExpired(datasetId);
           setDayError(error instanceof Error ? error.message : "Unable to load the selected day.");
         }
       } finally {
@@ -836,7 +821,7 @@ export default function DataUploadPage({ onDatasetUploaded }: DataUploadPageProp
 
     void loadDay();
     return () => controller.abort();
-  }, [selectedDate, uploadResult]);
+  }, [dataset, onDatasetExpired, projectId, selectedDate]);
 
   const resetForFile = (file: File | null) => {
     headerReadSequenceRef.current += 1;
@@ -855,8 +840,6 @@ export default function DataUploadPage({ onDatasetUploaded }: DataUploadPageProp
     setUploadPhase("idle");
     setUploadProgress(0);
     setUploadErrors([]);
-    setUploadResult(null);
-    setSelectedDate("");
     setDayResult(null);
     setDayError(null);
   };
@@ -989,12 +972,12 @@ export default function DataUploadPage({ onDatasetUploaded }: DataUploadPageProp
     const request = new XMLHttpRequest();
     activeRequestRef.current = request;
     setUploadErrors([]);
-    setUploadResult(null);
     setDayResult(null);
     setUploadProgress(0);
     setUploadPhase("uploading");
 
-    request.open("POST", "/api/datasets/upload");
+    request.open("POST", `/api/projects/${encodeURIComponent(projectId)}/datasets`);
+    request.withCredentials = true;
     request.responseType = "json";
     request.setRequestHeader("Accept", "application/json");
 
@@ -1021,17 +1004,23 @@ export default function DataUploadPage({ onDatasetUploaded }: DataUploadPageProp
         return;
       }
       setUploadProgress(100);
-      setUploadResult(payload);
-      setSelectedDate(payload.summary.start_date);
       onDatasetUploaded?.({
         datasetId: payload.dataset_id,
         filename: payload.filename,
         rowCount: payload.validation_summary.row_count,
         datasetType: payload.validation_summary.dataset_type ?? "partial",
+        status: "ready",
         startDate: payload.summary.start_date,
         endDate: payload.summary.end_date,
         annualPvEnergyKwh: payload.summary.annual_pv_energy_kwh,
         annualEvEnergyKwh: payload.summary.annual_ev_energy_kwh,
+        pvPeakKw: payload.summary.pv_peak_kw,
+        evPeakKw: payload.summary.ev_peak_kw,
+        intervalMinutes: payload.validation_summary.interval_minutes,
+        durationDays: payload.validation_summary.duration_days ?? null,
+        timestampsGenerated: payload.validation_summary.timestamps_generated === true,
+        notice: payload.validation_summary.notice ?? null,
+        detectedColumns: payload.validation_summary.detected_columns,
       });
     };
 
@@ -1052,12 +1041,12 @@ export default function DataUploadPage({ onDatasetUploaded }: DataUploadPageProp
   };
 
   const isBusy = uploadPhase !== "idle";
-  const isPartialDataset = uploadResult?.validation_summary.dataset_type === "partial";
-  const annualMetrics = uploadResult
+  const isPartialDataset = dataset?.datasetType === "partial";
+  const annualMetrics = dataset
     ? [
         {
           label: isPartialDataset ? "Dataset PV energy" : "Annual PV energy",
-          value: uploadResult.summary.annual_pv_energy_kwh,
+          value: dataset.annualPvEnergyKwh,
           unit: "kWh",
           icon: SolarPowerRoundedIcon,
           color: "#b45309",
@@ -1065,7 +1054,7 @@ export default function DataUploadPage({ onDatasetUploaded }: DataUploadPageProp
         },
         {
           label: isPartialDataset ? "Dataset EV energy" : "Annual EV energy",
-          value: uploadResult.summary.annual_ev_energy_kwh,
+          value: dataset.annualEvEnergyKwh,
           unit: "kWh",
           icon: ElectricCarRoundedIcon,
           color: "#2563eb",
@@ -1073,7 +1062,7 @@ export default function DataUploadPage({ onDatasetUploaded }: DataUploadPageProp
         },
         {
           label: "PV peak",
-          value: uploadResult.summary.pv_peak_kw,
+          value: dataset.pvPeakKw,
           unit: "kW",
           icon: TrendingUpRoundedIcon,
           color: "#0f766e",
@@ -1081,7 +1070,7 @@ export default function DataUploadPage({ onDatasetUploaded }: DataUploadPageProp
         },
         {
           label: "EV peak",
-          value: uploadResult.summary.ev_peak_kw,
+          value: dataset.evPeakKw,
           unit: "kW",
           icon: QueryStatsRoundedIcon,
           color: "#7c3aed",
@@ -1103,9 +1092,44 @@ export default function DataUploadPage({ onDatasetUploaded }: DataUploadPageProp
 
   return (
     <Stack spacing={3}>
+      <PageHeader
+        eyebrow="PROJECT DATA"
+        title="Dataset"
+        subtitle="Upload, validate and explore the active PV and EV dataset."
+        action={(
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+            {!dataset ? (
+              <Button variant="contained" startIcon={<CloudUploadRoundedIcon />} onClick={openFilePicker}>Upload Dataset</Button>
+            ) : (
+              <Button color="error" variant="outlined" startIcon={<DeleteOutlineRoundedIcon />} onClick={() => setRemoveTarget(dataset.datasetId)}>Remove Dataset</Button>
+            )}
+            {projectDatasets.length > 0 ? <Button variant="outlined" onClick={() => setProjectDatasetsOpen((open) => !open)}>Select Dataset</Button> : null}
+            <Button variant="text" onClick={() => document.getElementById("day-explorer")?.scrollIntoView({ behavior: "smooth" })} disabled={!dataset}>Change Day</Button>
+          </Stack>
+        )}
+      />
+
+      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2,minmax(0,1fr))", lg: "repeat(4,minmax(0,1fr))" }, gap: 1.5 }}>
+        {[
+          ["Active Dataset", dataset?.filename ?? "None"],
+          ["Rows", dataset ? dataset.rowCount.toLocaleString() : "—"],
+          ["Date Range", dataset ? `${dataset.startDate} → ${dataset.endDate}` : "—"],
+        ].map(([label, value]) => (
+          <SurfaceCard key={label} sx={{ p: 2, minHeight: 112 }}>
+            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>{label}</Typography>
+            <Typography variant="h6" noWrap title={value} sx={{ mt: 1.2 }}>{value}</Typography>
+          </SurfaceCard>
+        ))}
+        <SurfaceCard sx={{ p: 2, minHeight: 112 }}>
+          <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>Status</Typography>
+          <Box sx={{ mt: 1.35 }}><StatusChip label={dataset?.status === "ready" ? "Available" : dataset?.status === "expired" ? "Expired" : "Not selected"} tone={dataset?.status === "ready" ? "success" : dataset?.status === "expired" ? "error" : "neutral"} /></Box>
+        </SurfaceCard>
+      </Box>
+
       <Paper
         elevation={0}
         sx={{
+          display: "none",
           position: "relative",
           overflow: "hidden",
           p: { xs: 2.5, sm: 3.5 },
@@ -1133,8 +1157,7 @@ export default function DataUploadPage({ onDatasetUploaded }: DataUploadPageProp
             Upload and explore an energy dataset
           </Typography>
           <Typography sx={{ mt: 1.2, maxWidth: 720, color: "rgba(240,253,250,0.82)", lineHeight: 1.7 }}>
-            Map PV and EV profiles with or without timestamps, review the energy signals,
-            then inspect any day at the native 15-minute resolution.
+            Upload PV and EV data, then explore 15-minute daily profiles.
           </Typography>
           <Stack direction="row" sx={{ mt: 2.2, flexWrap: "wrap", gap: 1 }}>
             <Chip label="CSV | 15-minute intervals" size="small" sx={{ bgcolor: "rgba(255,255,255,0.14)", color: "#fff", fontWeight: 750 }} />
@@ -1144,9 +1167,10 @@ export default function DataUploadPage({ onDatasetUploaded }: DataUploadPageProp
         </Box>
       </Paper>
 
+      {!dataset && (
       <Paper
         variant="outlined"
-        sx={{ p: { xs: 2, sm: 2.75 }, borderRadius: "24px", borderColor: "#e1e7ee" }}
+        sx={{ p: { xs: 2, sm: 2.75 }, borderRadius: "24px", borderColor: "divider", bgcolor: "background.paper" }}
       >
         <Stack
           direction={{ xs: "column", sm: "row" }}
@@ -1156,7 +1180,7 @@ export default function DataUploadPage({ onDatasetUploaded }: DataUploadPageProp
           <Box>
             <Typography variant="h6">Dataset file</Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>
-              Upload your data, then confirm how each CSV column should be used.
+              Map the required CSV columns before upload.
             </Typography>
           </Box>
           <Button
@@ -1184,13 +1208,13 @@ export default function DataUploadPage({ onDatasetUploaded }: DataUploadPageProp
             p: { xs: 3, sm: 4.5 },
             borderRadius: "20px",
             border: "2px dashed",
-            borderColor: dragActive ? "#0f766e" : selectedFile ? "#8bd4c9" : "#cbd5df",
+            borderColor: dragActive ? "primary.main" : selectedFile ? "rgba(155,239,74,.45)" : "divider",
             textAlign: "center",
             background: dragActive
-              ? "linear-gradient(135deg, #ecfdf5, #eff6ff)"
+              ? "rgba(155,239,74,.06)"
               : selectedFile
-                ? "linear-gradient(135deg, #f0fdfa, #f8fafc)"
-                : "#fafcfd",
+                ? "rgba(76,141,255,.05)"
+                : "#081522",
             transition: "border-color 180ms ease, background 180ms ease, transform 180ms ease",
             transform: dragActive ? "scale(1.006)" : "none",
             outline: "none",
@@ -1226,14 +1250,16 @@ export default function DataUploadPage({ onDatasetUploaded }: DataUploadPageProp
         {selectedFile && (
           <Paper
             component="section"
+            id="column-mapping"
             aria-labelledby="column-mapping-title"
             elevation={0}
             sx={{
               mt: 2.25,
               p: { xs: 2, sm: 2.5 },
               borderRadius: "20px",
-              border: "1px solid #dfe7ee",
-              background: "linear-gradient(135deg, #f8fafc 0%, #f0fdfa 100%)",
+              border: "1px solid",
+              borderColor: "divider",
+              bgcolor: "rgba(18,38,58,.72)",
             }}
           >
             <Stack direction="row" spacing={1.25} sx={{ alignItems: "flex-start" }}>
@@ -1256,7 +1282,7 @@ export default function DataUploadPage({ onDatasetUploaded }: DataUploadPageProp
                   Column mapping
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
-                  Review the suggested matches before the dataset is uploaded.
+                  Confirm the suggested matches.
                 </Typography>
               </Box>
             </Stack>
@@ -1439,6 +1465,7 @@ export default function DataUploadPage({ onDatasetUploaded }: DataUploadPageProp
           </Box>
         )}
       </Paper>
+      )}
 
       {uploadErrors.length > 0 && (
         <Alert severity="error" icon={<ErrorOutlineRoundedIcon />} sx={{ borderRadius: "18px", alignItems: "flex-start" }}>
@@ -1455,32 +1482,64 @@ export default function DataUploadPage({ onDatasetUploaded }: DataUploadPageProp
         </Alert>
       )}
 
-      {uploadResult && (
+      {projectDatasets.length > 0 && (
+        <Collapse in={projectDatasetsOpen}>
+            <Paper variant="outlined" sx={{ p: 2, borderRadius: "20px", borderColor: "#dbe7ec" }}>
+              <Stack direction="row" sx={{ justifyContent: "space-between", alignItems: "center" }}>
+                <Typography variant="h6">Project Datasets</Typography>
+                <Button size="small" endIcon={<ExpandMoreRoundedIcon sx={{ transform: "rotate(180deg)" }} />} onClick={() => setProjectDatasetsOpen(false)}>Close</Button>
+              </Stack>
+              <Stack spacing={1} sx={{ mt: 1.25 }}>
+                {projectDatasets.map((item) => (
+                  <Stack key={item.dataset_id} direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ alignItems: { sm: "center" }, justifyContent: "space-between", p: 1.25, borderRadius: "14px", bgcolor: item.dataset_id === dataset?.datasetId ? "rgba(155,239,74,.08)" : "rgba(255,255,255,.025)" }}>
+                    <Box>
+                      <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>{item.filename}</Typography>
+                      <Typography variant="caption" color="text.secondary">{item.row_count.toLocaleString()} rows · {item.start_date} to {item.end_date}</Typography>
+                    </Box>
+                    <Stack direction="row" spacing={0.75}>
+                      <Button size="small" disabled={item.dataset_id === dataset?.datasetId || item.status !== "ready"} onClick={() => onUseDataset?.(item.dataset_id)}>
+                        {item.dataset_id === dataset?.datasetId ? "Current" : "Use Dataset"}
+                      </Button>
+                      <Button size="small" color="error" onClick={() => setRemoveTarget(item.dataset_id)}>Remove</Button>
+                    </Stack>
+                  </Stack>
+                ))}
+              </Stack>
+            </Paper>
+        </Collapse>
+      )}
+
+      {dataset && (
         <>
-          <Alert severity="success" icon={<CloudDoneRoundedIcon />} sx={{ borderRadius: "18px" }}>
+          {dataset.status === "expired" && (
+            <Alert severity="error" icon={<ErrorOutlineRoundedIcon />} sx={{ borderRadius: "18px" }}>
+              {DATASET_EXPIRED_MESSAGE}
+            </Alert>
+          )}
+          <Alert severity={dataset.status === "ready" ? "success" : "info"} icon={<CloudDoneRoundedIcon />} sx={{ borderRadius: "18px" }}>
             <Typography variant="subtitle2" sx={{ fontWeight: 850 }}>
-              Dataset validated and stored temporarily
+              {dataset.status === "ready" ? "Dataset validated and stored temporarily" : "Saved dataset details"}
             </Typography>
             <Typography variant="body2">
-              {uploadResult.validation_summary.row_count.toLocaleString()} rows | {datasetTypeLabel(uploadResult.validation_summary.dataset_type)}
-              {uploadResult.validation_summary.duration_days
-                ? ` (${uploadResult.validation_summary.duration_days.toLocaleString()} days)`
+              {dataset.rowCount.toLocaleString()} rows | {datasetTypeLabel(dataset.datasetType)}
+              {dataset.durationDays
+                ? ` (${dataset.durationDays.toLocaleString()} days)`
                 : ""}
-              {` | ${uploadResult.summary.start_date} to ${uploadResult.summary.end_date}`}
+              {` | ${dataset.startDate} to ${dataset.endDate}`}
             </Typography>
             <Typography variant="body2" sx={{ mt: 0.3 }}>
-              PV: {uploadResult.validation_summary.detected_columns.pv} | EV: {uploadResult.validation_summary.detected_columns.ev} | {uploadResult.validation_summary.detected_columns.timestamp
-                ? `Timestamp: ${uploadResult.validation_summary.detected_columns.timestamp}`
+              PV: {dataset.detectedColumns.pv} | EV: {dataset.detectedColumns.ev} | {dataset.detectedColumns.timestamp
+                ? `Timestamp: ${dataset.detectedColumns.timestamp}`
                 : "Timestamp: generated"}
-              {uploadResult.validation_summary.detected_columns.tariff
-                ? ` | Tariff: ${uploadResult.validation_summary.detected_columns.tariff}`
+              {dataset.detectedColumns.tariff
+                ? ` | Tariff: ${dataset.detectedColumns.tariff}`
                 : ""}
             </Typography>
           </Alert>
 
-          {uploadResult.validation_summary.timestamps_generated && (
+          {dataset.timestampsGenerated && (
             <Alert severity="info" sx={{ borderRadius: "18px" }}>
-              {uploadResult.validation_summary.notice ?? NO_TIMESTAMP_NOTICE}
+              {dataset.notice ?? NO_TIMESTAMP_NOTICE}
             </Alert>
           )}
 
@@ -1490,7 +1549,7 @@ export default function DataUploadPage({ onDatasetUploaded }: DataUploadPageProp
                 <Typography id="annual-summary-title" variant="h6">
                   {isPartialDataset ? "Dataset summary" : "Annual summary"}
                 </Typography>
-                <Typography variant="body2" color="text.secondary">Energy uses 0.25 hours per validated interval</Typography>
+                <Typography variant="body2" color="text.secondary">Calculated at 0.25 hours per interval.</Typography>
               </Box>
               <Chip icon={<CheckCircleRoundedIcon />} label="Validated" color="success" size="small" variant="outlined" />
             </Stack>
@@ -1499,25 +1558,25 @@ export default function DataUploadPage({ onDatasetUploaded }: DataUploadPageProp
             </Box>
           </Box>
 
-          <Paper variant="outlined" sx={{ p: { xs: 2, sm: 2.5 }, borderRadius: "22px", borderColor: "#e1e7ee" }}>
+          <Paper id="day-explorer" variant="outlined" sx={{ p: { xs: 2, sm: 2.5 }, borderRadius: "22px", borderColor: "divider" }}>
             <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ justifyContent: "space-between", alignItems: { sm: "center" } }}>
               <Box>
                 <Typography variant="h6">Day explorer</Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mt: 0.35 }}>
-                  Select any available date to inspect all 96 quarter-hour intervals.
+                  Choose a date to view its 96 intervals.
                 </Typography>
               </Box>
               <TextField
                 label="Explore date"
                 type="date"
-                value={selectedDate}
-                onChange={(event) => setSelectedDate(event.target.value)}
-                disabled={dayLoading}
+                value={selectedDate ?? ""}
+                onChange={(event) => onSelectedDateChange(event.target.value)}
+                disabled={dayLoading || dataset.status === "expired"}
                 slotProps={{
                   inputLabel: { shrink: true },
                   htmlInput: {
-                    min: uploadResult.summary.start_date,
-                    max: uploadResult.summary.end_date,
+                    min: dataset.startDate,
+                    max: dataset.endDate,
                   },
                   input: { startAdornment: <CalendarMonthRoundedIcon color="action" sx={{ mr: 1 }} /> },
                 }}
@@ -1571,7 +1630,7 @@ export default function DataUploadPage({ onDatasetUploaded }: DataUploadPageProp
                       Battery profiles are not available yet
                     </Typography>
                     <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25, lineHeight: 1.6 }}>
-                      Battery charging, discharging, and SOC profiles will appear after running the dispatch simulation.
+                      Charging, discharging, and SOC appear after dispatch simulation.
                     </Typography>
                   </Box>
                 </Stack>
@@ -1580,6 +1639,26 @@ export default function DataUploadPage({ onDatasetUploaded }: DataUploadPageProp
           )}
         </>
       )}
+
+      <Dialog open={Boolean(removeTarget)} onClose={() => setRemoveTarget(null)} fullWidth maxWidth="xs">
+        <DialogTitle>Remove Dataset</DialogTitle>
+        <DialogContent>
+          <Typography>Remove this dataset from the project? The upload option will become available when no active dataset remains.</Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setRemoveTarget(null)}>Cancel</Button>
+          <Button
+            color="error"
+            variant="contained"
+            onClick={() => {
+              if (removeTarget) onRemoveDataset?.(removeTarget);
+              setRemoveTarget(null);
+            }}
+          >
+            Remove Dataset
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Stack>
   );
 }

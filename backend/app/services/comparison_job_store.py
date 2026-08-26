@@ -103,6 +103,63 @@ class ComparisonOptimizationJobStore:
             self._jobs[job_id] = record
         return job_id
 
+    def restore(
+        self,
+        *,
+        job_id: str,
+        request_snapshot: object,
+        total_generations: int,
+        estimated_total_evaluations: int,
+        total_batteries: int,
+        current_generation: int = 0,
+        current_battery_index: int = 0,
+        current_battery_evaluations_completed: int = 0,
+        total_evaluations_completed: int = 0,
+        battery_results: list[object] | None = None,
+        current_best_result: object | None = None,
+        status: JobStatus = "queued",
+        error: str | None = None,
+    ) -> None:
+        """Recreate comparison progress and partial results after validation."""
+
+        if status not in {"queued", "failed", "cancelled"}:
+            raise ValueError("A restored comparison job must be queued or terminal.")
+        results = deepcopy(battery_results or [])
+        record = _JobRecord(
+            job_id=job_id,
+            request_snapshot=deepcopy(request_snapshot),
+            total_generations=total_generations,
+            estimated_total_evaluations=estimated_total_evaluations,
+            total_batteries=total_batteries,
+            status=status,
+            current_generation=current_generation,
+            evaluations_completed=total_evaluations_completed,
+            completed_battery_count=len(results),
+            current_battery_index=current_battery_index,
+            current_battery_evaluations_completed=current_battery_evaluations_completed,
+            current_battery_estimated_evaluations=(
+                estimated_total_evaluations // max(total_batteries, 1)
+            ),
+            total_evaluations_completed=total_evaluations_completed,
+            total_estimated_evaluations=estimated_total_evaluations,
+            battery_results=results,
+            progress_percent=min(
+                100.0,
+                100.0 * total_evaluations_completed / estimated_total_evaluations,
+            ),
+            error=error,
+        )
+        if isinstance(current_best_result, dict):
+            record.current_best_capacity_kwh = self._optional_finite(current_best_result.get("bess_capacity_kwh"), "bess_capacity_kwh")
+            record.current_best_peak_support_pct = self._optional_finite(current_best_result.get("peak_support_pct"), "peak_support_pct")
+            record.current_best_total_annual_cost_rs = self._optional_finite(current_best_result.get("total_annual_cost_rs"), "total_annual_cost_rs")
+            record.current_best_raw_cost_rs = record.current_best_total_annual_cost_rs
+            record.current_best_fitness_rs = self._optional_finite(current_best_result.get("fitness_rs"), "fitness_rs")
+            feasible = current_best_result.get("is_feasible")
+            record.current_best_is_feasible = feasible if isinstance(feasible, bool) else None
+        with self._lock:
+            self._jobs[job_id] = record
+
     def claim(self, job_id: str) -> bool:
         with self._lock:
             record = self._get(job_id)

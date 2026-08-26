@@ -16,6 +16,7 @@ from app.services.single_ga_service import OptimizationCancelled, run_single_ga
 
 logger = logging.getLogger(__name__)
 GARunner = Callable[..., dict[str, object]]
+CheckpointCallback = Callable[[dict[str, object]], None]
 
 
 def run_comparison_job(
@@ -26,17 +27,39 @@ def run_comparison_job(
     records: Sequence[object],
     enabled_batteries: Sequence[object],
     runner: GARunner = run_single_ga,
+    checkpoint_callback: CheckpointCallback | None = None,
+    resume_state: Mapping[str, object] | None = None,
 ) -> None:
     if not store.claim(job_id):
         return
 
     ga = request.ga_settings
-    battery_results: list[dict[str, object]] = []
-    cumulative_evaluations = 0
+    if resume_state is None:
+        battery_results: list[dict[str, object]] = []
+        cumulative_evaluations = 0
+        starting_battery_index = 0
+        current_ga_resume_state: Mapping[str, object] | None = None
+    else:
+        stored_results = resume_state.get("completed_battery_results", [])
+        if not isinstance(stored_results, Sequence) or isinstance(stored_results, (str, bytes)):
+            raise ValueError("The comparison resume results are invalid.")
+        battery_results = [dict(item) for item in stored_results if isinstance(item, Mapping)]
+        if len(battery_results) != len(stored_results):
+            raise ValueError("The comparison resume results are invalid.")
+        starting_battery_index = int(resume_state.get("current_battery_index", 0))
+        cumulative_evaluations = int(resume_state.get("total_evaluations_completed", 0))
+        ga_state_value = resume_state.get("ga_state")
+        current_ga_resume_state = ga_state_value if isinstance(ga_state_value, Mapping) else None
+        if (
+            starting_battery_index < 0
+            or starting_battery_index > len(enabled_batteries)
+            or len(battery_results) != starting_battery_index
+        ):
+            raise ValueError("The comparison resume checkpoint is inconsistent.")
     estimated_total_evaluations = (
         ga.population_size * ga.generations * len(enabled_batteries)
     )
-    current_battery_index = 0
+    current_battery_index = starting_battery_index
     current_battery_name: str | None = None
     current_battery_id: str | None = None
     current_battery_evaluations_completed = 0
@@ -77,8 +100,26 @@ def run_comparison_job(
             current_best_is_feasible=bool(best_result["is_feasible"]),
         )
 
+    def publish_generation_checkpoint(ga_state: dict[str, object]) -> None:
+        if checkpoint_callback is None:
+            return
+        checkpoint_callback(
+            {
+                "current_battery_index": current_battery_index,
+                "current_battery_name": current_battery_name,
+                "current_battery_id": current_battery_id,
+                "total_battery_count": len(enabled_batteries),
+                "completed_battery_results": battery_results,
+                "total_evaluations_completed": (
+                    current_battery_evaluation_offset
+                    + int(ga_state.get("evaluations_completed", 0))
+                ),
+                "ga_state": ga_state,
+            }
+        )
     try:
-        for index, option in enumerate(enabled_batteries):
+        for index in range(starting_battery_index, len(enabled_batteries)):
+            option = enabled_batteries[index]
             if store.is_cancel_requested(job_id):
                 raise OptimizationCancelled(0, 0)
 
@@ -86,11 +127,31 @@ def run_comparison_job(
             battery_payload = _plain_battery_payload(option.battery)
             current_battery_name = str(battery_payload.get("name", ""))
             current_battery_id = f"battery-{index + 1}"
-            current_battery_evaluations_completed = 0
-            current_battery_evaluation_offset = cumulative_evaluations
+            battery_resume_state = (
+                current_ga_resume_state
+                if index == starting_battery_index
+                else None
+            )
+            current_battery_evaluations_completed = (
+                int(battery_resume_state.get("evaluations_completed", 0))
+                if battery_resume_state is not None
+                else 0
+            )
+            current_battery_evaluation_offset = sum(
+                int(item.get("total_fitness_evaluations", 0))
+                for item in battery_results
+            )
+            cumulative_evaluations = (
+                current_battery_evaluation_offset
+                + current_battery_evaluations_completed
+            )
             store.update_progress(
                 job_id,
-                current_generation=0,
+                current_generation=(
+                    int(battery_resume_state.get("last_completed_generation", 0))
+                    if battery_resume_state is not None
+                    else 0
+                ),
                 evaluations_completed=cumulative_evaluations,
                 completed_battery_count=len(battery_results),
                 current_battery_index=current_battery_index,
@@ -108,7 +169,7 @@ def run_comparison_job(
                 current_best_is_feasible=None,
             )
 
-            result = runner(
+            runner_arguments: dict[str, object] = dict(
                 records=records,
                 battery=battery_payload,
                 economic_settings=request.economic_settings,
@@ -125,6 +186,11 @@ def run_comparison_job(
                 progress_callback=publish_progress,
                 cancellation_requested=lambda: store.is_cancel_requested(job_id),
             )
+            if checkpoint_callback is not None:
+                runner_arguments["checkpoint_callback"] = publish_generation_checkpoint
+            if battery_resume_state is not None:
+                runner_arguments["resume_state"] = battery_resume_state
+            result = runner(**runner_arguments)
             if store.is_cancel_requested(job_id):
                 raise OptimizationCancelled(0, 0)
 
@@ -166,6 +232,19 @@ def run_comparison_job(
                 current_best_fitness_rs=float(battery_result["best_fitness_rs"]),
                 current_best_is_feasible=bool(battery_result["is_feasible"]),
             )
+            current_ga_resume_state = None
+            if checkpoint_callback is not None:
+                checkpoint_callback(
+                    {
+                        "current_battery_index": index + 1,
+                        "current_battery_name": None,
+                        "current_battery_id": None,
+                        "total_battery_count": len(enabled_batteries),
+                        "completed_battery_results": battery_results,
+                        "total_evaluations_completed": cumulative_evaluations,
+                        "ga_state": None,
+                    }
+                )
 
         validated_results = [
             ComparisonOptimizationBatteryResult(**item)

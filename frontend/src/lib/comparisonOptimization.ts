@@ -14,6 +14,7 @@ import {
   buildComparisonRevision,
   isValidComparisonBatteryResult,
 } from "./comparisonResults.ts";
+import { batteryDisplayName } from "./batteryCatalogue.ts";
 
 export const INITIAL_COMPARISON_RUN_STATE: ComparisonRunWorkspaceState = {
   phase: "ready",
@@ -52,6 +53,11 @@ export interface ComparisonOptimizationRunRequest {
     elite_count: number;
     random_seed: number;
   };
+}
+
+export function comparisonRunEndpoint(projectId: string): string {
+  if (!projectId) throw new Error("Open a project before starting an optimization.");
+  return `/api/projects/${encodeURIComponent(projectId)}/comparison-optimization/run`;
 }
 
 const finite = (value: unknown): value is number =>
@@ -93,6 +99,7 @@ export function createDefaultComparisonConfiguration(
       residualValueEnabled: false,
     },
     savedAt: null,
+    workflowStep: 0,
   };
 }
 
@@ -144,7 +151,11 @@ export function validateComparisonConfiguration(
 ): string[] {
   const errors = configuration.batteries.flatMap(validateBattery);
   if (enabledBatteryCount(configuration) < 2) errors.push("Enable at least two battery alternatives.");
-  if (!dataset?.datasetId) errors.push("Upload a valid dataset before starting the comparison.");
+  if (!dataset?.datasetId) {
+    errors.push("Select or upload an active dataset before starting Comparison Mode.");
+  } else if (dataset.status === "expired") {
+    errors.push("The active dataset is unavailable. Select or upload a valid dataset.");
+  }
   if (dispatch.status !== "Reference Strategy") errors.push("The modified dispatch strategy is not scientifically connected yet.");
   if (!finite(configuration.minimumBessCapacityKwh) || configuration.minimumBessCapacityKwh <= 0) errors.push("Minimum BESS capacity must be greater than zero.");
   if (!finite(configuration.maximumBessCapacityKwh) || configuration.maximumBessCapacityKwh > 10_000 || configuration.maximumBessCapacityKwh <= configuration.minimumBessCapacityKwh) errors.push("Maximum BESS capacity must be greater than the minimum and no more than 10,000 kWh.");
@@ -320,7 +331,17 @@ export function sanitizeComparisonConfiguration(value: unknown): ComparisonOptim
   if (!Array.isArray(configuration.batteries) || configuration.batteries.length < 2) return null;
   if (!configuration.batteries.every((option) => typeof option.id === "string" && typeof option.enabled === "boolean" && validateBattery(option, 0).length === 0)) return null;
   if (!configuration.gaSettings || !configuration.economicSettings) return null;
-  return configuration;
+  return {
+    ...configuration,
+    batteries: configuration.batteries.map((option) => ({
+      ...option,
+      id: option.id === "medium-high" ? "high-4" : option.id,
+      battery: {
+        ...option.battery,
+        name: batteryDisplayName(option.battery.name),
+      },
+    })),
+  };
 }
 
 export function sanitizeComparisonRunState(value: unknown): ComparisonRunWorkspaceState {

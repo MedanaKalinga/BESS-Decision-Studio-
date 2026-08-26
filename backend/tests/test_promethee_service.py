@@ -12,6 +12,8 @@ from app.schemas.promethee import (
 from app.services.promethee_service import (
     CRITERIA_ORDER,
     CRITERION_DIRECTIONS,
+    PROMETHEE_P_RANGE_FRACTION,
+    PROMETHEE_Q_RANGE_FRACTION,
     calculate_promethee,
     type_iii_preference,
 )
@@ -64,21 +66,19 @@ class TestTypeThreePreference(unittest.TestCase):
 class TestPrometheeCriterionOrientation(unittest.TestCase):
     def test_every_criterion_uses_the_required_orientation(self) -> None:
         cases = {
-            "total_annual_cost_rs": (50.0, 150.0),
+            "total_annual_cost_Rs": (50.0, 150.0),
             "cycle_based_life_years": (20.0, 10.0),
             "round_trip_efficiency": (0.95, 0.80),
             "weight_density_kg_per_kwh": (5.0, 10.0),
-            "annual_om_cost_rs": (2.0, 8.0),
             "warranty_years": (12.0, 5.0),
         }
         self.assertEqual(
             dict(zip(CRITERIA_ORDER, CRITERION_DIRECTIONS, strict=True)),
             {
-                "total_annual_cost_rs": "minimize",
+                "total_annual_cost_Rs": "minimize",
                 "cycle_based_life_years": "maximize",
                 "round_trip_efficiency": "maximize",
                 "weight_density_kg_per_kwh": "minimize",
-                "annual_om_cost_rs": "minimize",
                 "warranty_years": "maximize",
             },
         )
@@ -86,12 +86,17 @@ class TestPrometheeCriterionOrientation(unittest.TestCase):
         for criterion_index, criterion in enumerate(CRITERIA_ORDER):
             with self.subTest(criterion=criterion):
                 better, worse = cases[criterion]
-                weights = [0.0] * 6
+                field = (
+                    "total_annual_cost_rs"
+                    if criterion == "total_annual_cost_Rs"
+                    else criterion
+                )
+                weights = [0.0] * 5
                 weights[criterion_index] = 1.0
                 result = calculate_promethee(
                     [
-                        alternative("Better", **{criterion: better}),
-                        alternative("Worse", **{criterion: worse}),
+                        alternative("Better", **{field: better}),
+                        alternative("Worse", **{field: worse}),
                     ],
                     weights,
                 )
@@ -110,7 +115,7 @@ class TestPrometheeFlows(unittest.TestCase):
                 alternative("B", total_annual_cost_rs=100.0, warranty_years=8.0),
                 alternative("C", total_annual_cost_rs=140.0, warranty_years=5.0),
             ],
-            [2.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+            [2.0, 1.0, 1.0, 1.0, 1.0],
         )
 
         aggregated = result["aggregated_preference_matrix"]
@@ -136,9 +141,9 @@ class TestPrometheeFlows(unittest.TestCase):
     def test_constant_ranges_produce_zero_preferences_without_division(self) -> None:
         result = calculate_promethee(
             [alternative("First"), alternative("Second")],
-            [1.0] * 6,
+            [1.0] * 5,
         )
-        self.assertEqual(result["p_thresholds"], [0.0] * 6)
+        self.assertEqual(result["p_thresholds"], [1.0] * 5)
         self.assertEqual(result["aggregated_preference_matrix"], [[0.0, 0.0], [0.0, 0.0]])
         self.assertEqual(
             [entry["battery_name"] for entry in result["ordered_ranking"]],
@@ -147,6 +152,21 @@ class TestPrometheeFlows(unittest.TestCase):
         self.assertFalse(
             any(math.copysign(1.0, value) < 0 for value in result["net_flows"])
         )
+
+    def test_thresholds_use_zero_q_and_ten_percent_of_observed_range(self) -> None:
+        result = calculate_promethee(
+            [
+                alternative("Low", total_annual_cost_rs=100.0),
+                alternative("High", total_annual_cost_rs=200.0),
+            ],
+            [1.0] * 5,
+        )
+        self.assertEqual(PROMETHEE_Q_RANGE_FRACTION, 0.0)
+        self.assertEqual(PROMETHEE_P_RANGE_FRACTION, 0.1)
+        self.assertEqual(result["q_thresholds"], [0.0] * 5)
+        self.assertEqual(result["p_thresholds"][0], 10.0)
+        self.assertNotIn("annual_om_cost_rs", result["criteria_order"])
+        self.assertTrue(all(len(row) == 5 for row in result["raw_decision_matrix"]))
 
 
 class TestPrometheeFeasibility(unittest.TestCase):
@@ -157,7 +177,7 @@ class TestPrometheeFeasibility(unittest.TestCase):
                 alternative("Excluded", feasible=False, total_annual_cost_rs=1.0),
                 alternative("Feasible B", total_annual_cost_rs=110.0),
             ],
-            [1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0, 0.0, 0.0],
         )
         self.assertEqual(result["scientific_status"], "ranking_completed")
         self.assertEqual(result["recommended_battery"], "Feasible A")
@@ -177,7 +197,7 @@ class TestPrometheeFeasibility(unittest.TestCase):
     def test_one_feasible_alternative_does_not_calculate_flows(self) -> None:
         result = calculate_promethee(
             [alternative("Only feasible"), alternative("Excluded", feasible=False)],
-            [1.0] * 6,
+            [1.0] * 5,
         )
         self.assertEqual(
             result["scientific_status"],
@@ -190,7 +210,7 @@ class TestPrometheeFeasibility(unittest.TestCase):
     def test_zero_feasible_alternatives_does_not_calculate_flows(self) -> None:
         result = calculate_promethee(
             [alternative("Excluded A", feasible=False), alternative("Excluded B", feasible=False)],
-            [1.0] * 6,
+            [1.0] * 5,
         )
         self.assertEqual(result["scientific_status"], "no_feasible_alternatives")
         self.assertEqual(len(result["excluded_alternatives"]), 2)
@@ -201,26 +221,26 @@ class TestPrometheeFeasibility(unittest.TestCase):
 class TestPrometheeValidation(unittest.TestCase):
     def test_fewer_than_two_alternatives_are_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "At least two"):
-            calculate_promethee([alternative("Only")], [1.0] * 6)
+            calculate_promethee([alternative("Only")], [1.0] * 5)
 
     def test_weights_are_normalized(self) -> None:
         result = calculate_promethee(
             [alternative("A"), alternative("B")],
-            [2.0, 2.0, 1.0, 1.0, 1.0, 1.0],
+            [2.0, 2.0, 1.0, 1.0, 1.0],
         )
         self.assertAlmostEqual(sum(result["normalized_weights"]), 1.0, places=12)
-        self.assertEqual(result["normalized_weights"][:2], [0.25, 0.25])
+        self.assertEqual(result["normalized_weights"][:2], [2 / 7, 2 / 7])
 
     def test_duplicate_names_and_invalid_weight_dimensions_are_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "unique"):
             calculate_promethee(
                 [alternative("Same"), alternative(" same ")],
-                [1.0] * 6,
+                [1.0] * 5,
             )
-        with self.assertRaisesRegex(ValueError, "Exactly six"):
+        with self.assertRaisesRegex(ValueError, "Exactly five"):
             calculate_promethee(
                 [alternative("A"), alternative("B")],
-                [1.0] * 5,
+                [1.0] * 6,
             )
 
     def test_non_finite_values_negative_weights_and_zero_total_are_rejected(self) -> None:
@@ -229,12 +249,12 @@ class TestPrometheeValidation(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "negative"):
             calculate_promethee(
                 [alternative("A"), alternative("B")],
-                [-1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+                [-1.0, 1.0, 1.0, 1.0, 1.0],
             )
         with self.assertRaisesRegex(ValueError, "greater than zero"):
             calculate_promethee(
                 [alternative("A"), alternative("B")],
-                [0.0] * 6,
+                [0.0] * 5,
             )
 
     def test_schema_rejects_missing_criteria_and_malformed_feasibility(self) -> None:
@@ -273,24 +293,24 @@ class TestPrometheeManualParity(unittest.TestCase):
                 alternative("B", total_annual_cost_rs=20.0),
                 alternative("C", total_annual_cost_rs=30.0),
             ],
-            [1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0, 0.0, 0.0],
             accepted_ahp_revision=7,
         )
 
         expected_matrix = [
-            [0.0, 0.5, 1.0],
-            [0.0, 0.0, 0.5],
+            [0.0, 1.0, 1.0],
+            [0.0, 0.0, 1.0],
             [0.0, 0.0, 0.0],
         ]
-        self.assertEqual(result["p_thresholds"], [20.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        self.assertEqual(result["p_thresholds"], [2.0, 1.0, 1.0, 1.0, 1.0])
         self.assertEqual(
-            result["criterion_preference_matrices"]["total_annual_cost_rs"],
+            result["criterion_preference_matrices"]["total_annual_cost_Rs"],
             expected_matrix,
         )
         self.assertEqual(result["aggregated_preference_matrix"], expected_matrix)
-        self.assertEqual(result["positive_flows"], [0.75, 0.25, 0.0])
-        self.assertEqual(result["negative_flows"], [0.0, 0.25, 0.75])
-        self.assertEqual(result["net_flows"], [0.75, 0.0, -0.75])
+        self.assertEqual(result["positive_flows"], [1.0, 0.5, 0.0])
+        self.assertEqual(result["negative_flows"], [0.0, 0.5, 1.0])
+        self.assertEqual(result["net_flows"], [1.0, 0.0, -1.0])
         self.assertEqual(
             [entry["battery_name"] for entry in result["ordered_ranking"]],
             ["A", "B", "C"],
@@ -305,7 +325,7 @@ class TestPrometheeAPI(unittest.TestCase):
         self.assertIn("post", operation)
         request = PrometheeCalculationRequest(
             alternatives=[alternative("A"), alternative("B")],
-            ahp_weights=[1.0] * 6,
+            ahp_weights=[1.0] * 5,
             accepted_ahp_revision="revision-4",
         )
         response = calculate_promethee_endpoint(request)

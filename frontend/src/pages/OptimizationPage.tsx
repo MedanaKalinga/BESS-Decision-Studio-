@@ -1,7 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import type { Dispatch, KeyboardEvent, SetStateAction } from "react";
 import ArrowForwardRoundedIcon from "@mui/icons-material/ArrowForwardRounded";
-import AutoAwesomeRoundedIcon from "@mui/icons-material/AutoAwesomeRounded";
 import BatteryChargingFullRoundedIcon from "@mui/icons-material/BatteryChargingFullRounded";
 import BoltRoundedIcon from "@mui/icons-material/BoltRounded";
 import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
@@ -20,10 +19,19 @@ import {
   Typography,
 } from "@mui/material";
 import type { SvgIconComponent } from "@mui/icons-material";
+import { PageHeader, SurfaceCard } from "../components/ui";
 
 import SingleBatteryConfiguration from "./SingleBatteryConfiguration";
 import SingleOptimizationSetup from "./SingleOptimizationSetup";
+import {
+  activeOptimizationMessage,
+  activeOptimizationMode,
+  comparisonDisabledReason,
+  type SingleOptimizationStep,
+} from "../lib/optimizationWorkflow";
+import { currentBatterySelectionId } from "../lib/batteryCatalogue";
 import type {
+  ComparisonRunPhase,
   SingleBatteryConfigurationSnapshot,
   ComparisonAHPWorkspaceState,
   SingleOptimizationRunWorkspaceState,
@@ -87,17 +95,23 @@ const BATTERIES: BatteryOption[] = [
   { id: "low-cost", number: "01", name: "Low-cost", descriptor: "Value-focused profile" },
   { id: "medium-low", number: "02", name: "Medium-low", descriptor: "Balanced entry profile" },
   { id: "medium", number: "03", name: "Medium", descriptor: "Performance balance" },
-  { id: "medium-high", number: "04", name: "Medium-high", descriptor: "Premium endurance profile" },
+  { id: "high", number: "04", name: "High", descriptor: "Premium endurance profile" },
 ];
 
 function ModeCard({
   mode,
   selected,
   onSelect,
+  onConfigure,
+  configureDisabled = false,
+  disabledReason = null,
 }: {
   mode: ModeDefinition;
   selected: boolean;
   onSelect: () => void;
+  onConfigure: () => void;
+  configureDisabled?: boolean;
+  disabledReason?: string | null;
 }) {
   const Icon = mode.icon;
 
@@ -121,15 +135,15 @@ function ModeCard({
         position: "relative",
         isolation: "isolate",
         overflow: "hidden",
-        minHeight: { xs: 380, md: 410 },
+        minHeight: { xs: 330, md: 360 },
         p: { xs: 2.5, sm: 3.25 },
         cursor: "pointer",
         borderRadius: "28px",
         border: "1px solid",
-        borderColor: selected ? "#0d9488" : "#dce5eb",
+        borderColor: selected ? "primary.main" : "divider",
         background: selected
-          ? "linear-gradient(145deg, #ecfdf8 0%, #eff8ff 58%, #ffffff 100%)"
-          : "linear-gradient(145deg, #ffffff 0%, #f8fbfd 100%)",
+          ? "linear-gradient(145deg, rgba(155,239,74,.09), rgba(76,141,255,.06))"
+          : "#0D1D2D",
         boxShadow: selected
           ? "0 20px 52px rgba(13, 148, 136, 0.16)"
           : "0 8px 28px rgba(15, 53, 70, 0.06)",
@@ -153,7 +167,7 @@ function ModeCard({
         },
         "&:hover": {
           transform: "translateY(-6px)",
-          borderColor: selected ? "#0d9488" : "#9ccbc7",
+          borderColor: selected ? "primary.main" : "rgba(155,239,74,.32)",
           boxShadow: "0 24px 56px rgba(15, 75, 91, 0.14)",
           "&::after": { transform: "scale(1.12)" },
         },
@@ -176,9 +190,9 @@ function ModeCard({
               display: "grid",
               placeItems: "center",
               borderRadius: "20px",
-              color: "#fff",
-              background: "linear-gradient(135deg, #0f766e 0%, #0ea5a6 52%, #2563eb 120%)",
-              boxShadow: "0 14px 30px rgba(15, 118, 110, 0.24)",
+              color: "#07111D",
+              background: "linear-gradient(135deg, #9BEF4A, #4C8DFF)",
+              boxShadow: "0 14px 30px rgba(0,0,0,.25)",
             }}
           >
             <Icon sx={{ fontSize: 32 }} />
@@ -191,8 +205,8 @@ function ModeCard({
               width: 28,
               height: 28,
               borderRadius: "50%",
-              color: selected ? "#fff" : "transparent",
-              bgcolor: selected ? "#0d9488" : "#fff",
+              color: selected ? "#07111D" : "transparent",
+              bgcolor: selected ? "primary.main" : "transparent",
               border: "2px solid",
               borderColor: selected ? "#0d9488" : "#cbd8df",
               transition: "all 180ms ease",
@@ -204,13 +218,13 @@ function ModeCard({
 
         <Typography
           variant="overline"
-          sx={{ mt: 3, color: "#0f766e", fontWeight: 850, letterSpacing: "0.11em" }}
+          sx={{ mt: 3, color: "primary.main", fontWeight: 850, letterSpacing: "0.11em" }}
         >
           {mode.eyebrow}
         </Typography>
         <Typography
           variant="h4"
-          sx={{ mt: 0.5, fontSize: { xs: 25, sm: 29 }, lineHeight: 1.14, fontWeight: 850, color: "#132f3c" }}
+          sx={{ mt: 0.5, fontSize: { xs: 25, sm: 29 }, lineHeight: 1.14, fontWeight: 850 }}
         >
           {mode.title}
         </Typography>
@@ -229,13 +243,13 @@ function ModeCard({
                   height: 32,
                   flexShrink: 0,
                   borderRadius: "10px",
-                  color: "#0f766e",
-                  bgcolor: "rgba(20, 184, 166, 0.11)",
+                  color: "primary.main",
+                  bgcolor: "rgba(155,239,74,.08)",
                 }}
               >
                 <HighlightIcon sx={{ fontSize: 18 }} />
               </Box>
-              <Typography variant="body2" sx={{ color: "#294653", fontWeight: 720 }}>
+              <Typography variant="body2" sx={{ color: "text.primary", fontWeight: 720 }}>
                 {label}
               </Typography>
             </Stack>
@@ -249,7 +263,7 @@ function ModeCard({
                 key={label}
                 size="small"
                 label={label}
-                sx={{ bgcolor: "#eef2f4", color: "#5d6d74", fontWeight: 750 }}
+                sx={{ bgcolor: "rgba(255,255,255,.05)", color: "text.secondary", fontWeight: 750 }}
               />
             ))}
           </Stack>
@@ -268,9 +282,9 @@ function ModeCard({
                     height: 31,
                     ml: index === 0 ? 0 : -0.7,
                     borderRadius: "50%",
-                    color: "#0f766e",
-                    bgcolor: index % 2 === 0 ? "#ccfbf1" : "#dbeafe",
-                    border: "2px solid #fff",
+                    color: index % 2 === 0 ? "primary.main" : "secondary.main",
+                    bgcolor: "#081522",
+                    border: "2px solid #0D1D2D",
                     fontSize: 10,
                     fontWeight: 850,
                   }}
@@ -284,6 +298,38 @@ function ModeCard({
             </Typography>
           </Stack>
         )}
+
+        <Button
+          type="button"
+          variant="contained"
+          endIcon={<ArrowForwardRoundedIcon />}
+          disabled={configureDisabled}
+          onClick={(event) => {
+            event.stopPropagation();
+            onConfigure();
+          }}
+          sx={{
+            mt: 2.25,
+            alignSelf: "stretch",
+            py: 1.15,
+            borderRadius: "13px",
+            background: "linear-gradient(100deg, #9BEF4A, #83D63B)",
+            color: "#07111D",
+          }}
+        >
+          {mode.id === "single"
+            ? "Configure Single Optimization"
+            : "Configure Battery Comparison"}
+        </Button>
+        {disabledReason ? (
+          <Typography
+            variant="caption"
+            role="status"
+            sx={{ mt: 0.8, minHeight: 20, color: "warning.main", fontWeight: 750 }}
+          >
+            {disabledReason}
+          </Typography>
+        ) : null}
       </Stack>
     </Paper>
   );
@@ -318,7 +364,7 @@ function BatterySelector({
             Select the battery to optimize
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.35 }}>
-            The GA will keep this battery type fixed while searching its capacity and peak support.
+            The GA keeps this battery type fixed.
           </Typography>
         </Box>
         <Chip label="Required for this mode" size="small" sx={{ alignSelf: { xs: "flex-start", md: "center" }, fontWeight: 750 }} />
@@ -398,6 +444,7 @@ function BatterySelector({
 }
 
 export default function OptimizationPage({
+  projectId,
   dataset,
   dispatchStrategy,
   onGoToDataUpload,
@@ -412,9 +459,15 @@ export default function OptimizationPage({
   operationalProfileDate,
   onOperationalProfileDateChange,
   comparisonAhp: initialComparisonAhp,
+  projectReady,
+  comparisonRunPhase,
   onOpenComparisonMode,
+  onViewActiveRun,
+  onViewResults,
+  onStepChange,
   onStateChange,
 }: {
+  projectId: string;
   dataset: WorkspaceDatasetSummary | null;
   dispatchStrategy: WorkspaceDispatchStrategy;
   onGoToDataUpload: () => void;
@@ -429,7 +482,12 @@ export default function OptimizationPage({
   operationalProfileDate: string | null;
   onOperationalProfileDateChange: (date: string | null) => void;
   comparisonAhp: ComparisonAHPWorkspaceState | null;
+  projectReady: boolean;
+  comparisonRunPhase: ComparisonRunPhase;
   onOpenComparisonMode: () => void;
+  onViewActiveRun: () => void;
+  onViewResults: () => void;
+  onStepChange: (step: SingleOptimizationStep) => void;
   onStateChange: (state: {
     selectedMode: "single" | "comparison" | null;
     selectedBatteryId: string | null;
@@ -442,7 +500,9 @@ export default function OptimizationPage({
   const [selectedMode, setSelectedMode] = useState<OptimizationMode | null>(
     initialMode === "single" || initialMode === "comparison" ? initialMode : null,
   );
-  const [selectedBattery, setSelectedBattery] = useState<string | null>(initialBatteryId);
+  const [selectedBattery, setSelectedBattery] = useState<string | null>(
+    currentBatterySelectionId(initialBatteryId),
+  );
   const [isReady, setIsReady] = useState(false);
   const [activeStep, setActiveStep] = useState<
     "mode-selection" | "single-configuration" | "single-setup" | "single-run" | "comparison-ahp"
@@ -459,15 +519,31 @@ export default function OptimizationPage({
     useState<ComparisonAHPWorkspaceState | null>(initialComparisonAhp);
 
   useEffect(() => {
-    if (initialActiveStep === "comparison-ahp" && initialMode === "comparison") {
-      setSelectedMode("comparison");
-      setActiveStep("comparison-ahp");
+    if (
+      initialActiveStep === "mode-selection"
+      || initialActiveStep === "single-configuration"
+      || initialActiveStep === "single-setup"
+      || initialActiveStep === "single-run"
+      || initialActiveStep === "comparison-ahp"
+    ) {
+      setActiveStep(initialActiveStep);
+    }
+    if (initialMode === "single" || initialMode === "comparison") {
+      setSelectedMode(initialMode);
     }
   }, [initialActiveStep, initialMode]);
 
   const canContinue =
     selectedMode === "comparison" || (selectedMode === "single" && selectedBattery !== null);
   const selectedBatteryName = BATTERIES.find((battery) => battery.id === selectedBattery)?.name;
+  const activeRunMode = activeOptimizationMode(runState.phase, comparisonRunPhase);
+  const activeRunReason = activeOptimizationMessage(activeRunMode);
+  const comparisonReason = activeRunReason ?? comparisonDisabledReason({
+    projectId,
+    projectLoading: !projectReady,
+    dataset,
+    runPhase: comparisonRunPhase,
+  });
 
   const persistState = (nextSelectedMode: OptimizationMode | null, nextSelectedBattery: string | null, nextBatteryConfiguration: SingleBatteryConfigurationSnapshot | null, nextSetupConfiguration: SingleOptimizationSetupSnapshot | null, nextActiveStep: "mode-selection" | "single-configuration" | "single-setup" | "single-run" | "comparison-ahp", nextComparisonAhp: ComparisonAHPWorkspaceState | null = comparisonAhp) => {
     onStateChange({
@@ -500,15 +576,29 @@ export default function OptimizationPage({
     if (selectedMode === "single" && selectedBatteryName) {
       setActiveStep("single-configuration");
       persistState(selectedMode, selectedBattery, batteryConfiguration, setupConfiguration, "single-configuration");
+      onStepChange("single-configuration");
       return;
     }
-    if (selectedMode === "comparison") {
+    if (selectedMode === "comparison" && !comparisonReason) {
       setActiveStep("mode-selection");
       persistState(selectedMode, selectedBattery, batteryConfiguration, setupConfiguration, "mode-selection");
       onOpenComparisonMode();
       return;
     }
     setIsReady(true);
+  }
+
+  function configureMode(mode: OptimizationMode) {
+    chooseMode(mode);
+    if (mode === "comparison") {
+      if (!comparisonReason) onOpenComparisonMode();
+      return;
+    }
+    if (selectedBatteryName) {
+      setActiveStep("single-configuration");
+      persistState("single", selectedBattery, batteryConfiguration, setupConfiguration, "single-configuration");
+      onStepChange("single-configuration");
+    }
   }
 
   if (activeStep === "comparison-ahp" && selectedMode === "comparison") {
@@ -542,11 +632,18 @@ export default function OptimizationPage({
           <SingleBatteryConfiguration
             batteryName={selectedBatteryName}
             initialConfiguration={batteryConfiguration}
-            onBack={() => setActiveStep("mode-selection")}
+            onBack={(configuration) => {
+              const preservedConfiguration = configuration ?? batteryConfiguration;
+              if (configuration) setBatteryConfiguration(configuration);
+              setActiveStep("mode-selection");
+              persistState(selectedMode, selectedBattery, preservedConfiguration, setupConfiguration, "mode-selection");
+              onStepChange("mode-selection");
+            }}
             onContinue={(configuration) => {
               setBatteryConfiguration(configuration);
               setActiveStep("single-setup");
               persistState(selectedMode, selectedBattery, configuration, setupConfiguration, "single-setup");
+              onStepChange("single-setup");
             }}
           />
         </Box>
@@ -554,12 +651,21 @@ export default function OptimizationPage({
           <Box sx={{ display: activeStep === "single-setup" ? "block" : "none" }}>
             <SingleOptimizationSetup
               battery={batteryConfiguration}
+              initialSetup={setupConfiguration}
               dataset={dataset}
               dispatchStrategy={dispatchStrategy}
-              onBack={() => setActiveStep("single-configuration")}
+              onBack={() => {
+                setActiveStep("single-configuration");
+                persistState(selectedMode, selectedBattery, batteryConfiguration, setupConfiguration, "single-configuration");
+                onStepChange("single-configuration");
+              }}
               onGoToDataUpload={onGoToDataUpload}
               onReviewDispatchStrategy={onReviewDispatchStrategy}
               onReadyToRun={(setup) => {
+                if (activeRunMode) {
+                  onViewActiveRun();
+                  return;
+                }
                 setSetupConfiguration(setup);
                 setRunState({
                   phase: "ready",
@@ -572,6 +678,7 @@ export default function OptimizationPage({
                 });
                 setActiveStep("single-run");
                 persistState(selectedMode, selectedBattery, batteryConfiguration, setup, "single-run");
+                onStepChange("single-run");
               }}
             />
           </Box>
@@ -580,6 +687,7 @@ export default function OptimizationPage({
           <Box sx={{ display: activeStep === "single-run" ? "block" : "none" }}>
             <Suspense fallback={<Paper variant="outlined" sx={{ p: 4, borderRadius: "24px" }}><Typography color="text.secondary">Loading optimization run workspace…</Typography></Paper>}>
               <SingleOptimizationRun
+                projectId={projectId}
                 battery={batteryConfiguration}
                 dataset={dataset}
                 dispatchStrategy={dispatchStrategy}
@@ -589,11 +697,16 @@ export default function OptimizationPage({
                 onBackToSetup={() => {
                   setActiveStep("single-setup");
                   persistState(selectedMode, selectedBattery, batteryConfiguration, setupConfiguration, "single-setup");
+                  onStepChange("single-setup");
                 }}
                 onAdjustSearchBounds={() => {
                   setActiveStep("single-setup");
                   persistState(selectedMode, selectedBattery, batteryConfiguration, setupConfiguration, "single-setup");
+                  onStepChange("single-setup");
                 }}
+                startBlockedReason={activeRunMode === "comparison" ? activeRunReason : null}
+                onViewActiveRun={onViewActiveRun}
+                onViewResults={onViewResults}
                 operationalProfileDate={operationalProfileDate}
                 onOperationalProfileDateChange={onOperationalProfileDateChange}
               />
@@ -606,50 +719,22 @@ export default function OptimizationPage({
 
   return (
     <Stack spacing={2.5}>
-      <Paper
-        elevation={0}
-        sx={{
-          position: "relative",
-          overflow: "hidden",
-          px: { xs: 2.5, sm: 3.5, lg: 4 },
-          py: { xs: 3.25, sm: 4 },
-          borderRadius: "28px",
-          color: "#fff",
-          background: "linear-gradient(118deg, #073e49 0%, #08766f 56%, #1669a9 125%)",
-          boxShadow: "0 20px 48px rgba(7, 62, 73, 0.2)",
-          "&::before": {
-            content: '\"\"',
-            position: "absolute",
-            width: 330,
-            height: 330,
-            right: -120,
-            top: -190,
-            borderRadius: "50%",
-            border: "55px solid rgba(255,255,255,0.055)",
-          },
-        }}
-      >
-        <Box sx={{ position: "relative", zIndex: 1, maxWidth: 790 }}>
-          <Chip
-            icon={<AutoAwesomeRoundedIcon />}
-            label="Optimization workspace"
-            size="small"
-            sx={{
-              color: "#fff",
-              bgcolor: "rgba(255,255,255,0.14)",
-              border: "1px solid rgba(255,255,255,0.16)",
-              fontWeight: 750,
-              "& .MuiChip-icon": { color: "#baf7ec" },
-            }}
-          />
-          <Typography variant="h3" sx={{ mt: 2, fontSize: { xs: 32, sm: 42 }, fontWeight: 850, letterSpacing: "-0.035em" }}>
-            Choose how to optimize your BESS
-          </Typography>
-          <Typography sx={{ mt: 1.2, maxWidth: 680, color: "rgba(255,255,255,0.79)", fontSize: { xs: 15, sm: 16.5 }, lineHeight: 1.7 }}>
-            Start with a focused system design or evaluate the complete battery portfolio. The optimization engine will be connected in a later milestone.
-          </Typography>
-        </Box>
-      </Paper>
+      <PageHeader
+        eyebrow="OPTIMIZATION"
+        title="Choose an optimization workflow"
+        subtitle="Size one battery or compare the enabled alternatives."
+      />
+
+      {activeRunReason ? (
+        <Alert
+          severity="info"
+          action={<Button color="inherit" onClick={onViewActiveRun}>View Running Optimization</Button>}
+          sx={{ borderRadius: "18px", alignItems: "center" }}
+        >
+          <Typography variant="subtitle2" sx={{ fontWeight: 850 }}>{activeRunReason}</Typography>
+          <Typography variant="body2">Wait for it to finish or cancel it before starting another optimization.</Typography>
+        </Alert>
+      ) : null}
 
       <Box component="section" aria-labelledby="optimization-mode-title">
         <Stack
@@ -658,11 +743,11 @@ export default function OptimizationPage({
           sx={{ mb: 1.8, justifyContent: "space-between", alignItems: { sm: "flex-end" } }}
         >
           <Box>
-            <Typography id="optimization-mode-title" variant="h5" sx={{ color: "#163542", fontWeight: 850 }}>
+            <Typography id="optimization-mode-title" variant="h5" sx={{ fontWeight: 850 }}>
               Select an optimization path
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 0.45 }}>
-              Choose one mode to configure the next stage of your study.
+              Select a workflow.
             </Typography>
           </Box>
           <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
@@ -681,6 +766,9 @@ export default function OptimizationPage({
               mode={mode}
               selected={selectedMode === mode.id}
               onSelect={() => chooseMode(mode.id)}
+              onConfigure={() => configureMode(mode.id)}
+              configureDisabled={Boolean(activeRunReason) || (mode.id === "comparison" && Boolean(comparisonReason))}
+              disabledReason={activeRunReason ?? (mode.id === "comparison" ? comparisonReason : null)}
             />
           ))}
         </Box>
@@ -694,13 +782,13 @@ export default function OptimizationPage({
         <Alert
           severity="info"
           icon={<CompareArrowsRoundedIcon />}
-          sx={{ borderRadius: "18px", border: "1px solid #cfe6ef", bgcolor: "#f3fbfd" }}
+          sx={{ borderRadius: "18px" }}
         >
           <Typography variant="subtitle2" sx={{ fontWeight: 820 }}>
             Comparison workflow selected
           </Typography>
           <Typography variant="body2">
-            Configure criteria weighting with the verified AHP service. No GA or PROMETHEE ranking will run during this milestone.
+            Configure criteria weights before ranking.
           </Typography>
           {comparisonAhp?.accepted && <Chip icon={<CheckCircleRoundedIcon />} label="AHP weights ready" size="small" color="success" sx={{ mt: 1.25, fontWeight: 800 }} />}
         </Alert>
@@ -710,7 +798,7 @@ export default function OptimizationPage({
         <Alert
           severity="success"
           icon={<CheckCircleRoundedIcon />}
-          sx={{ borderRadius: "18px", border: "1px solid #bce8d6", bgcolor: "#f1fdf7" }}
+          sx={{ borderRadius: "18px" }}
         >
           <Typography variant="subtitle2" sx={{ fontWeight: 820 }}>
             Optimization path prepared locally
@@ -725,8 +813,7 @@ export default function OptimizationPage({
         </Alert>
       )}
 
-      <Paper
-        elevation={0}
+      <SurfaceCard
         sx={{
           p: { xs: 2, sm: 2.25 },
           display: "flex",
@@ -735,24 +822,22 @@ export default function OptimizationPage({
           alignItems: { sm: "center" },
           justifyContent: "space-between",
           borderRadius: "22px",
-          border: "1px solid #dfe7eb",
-          bgcolor: "#fff",
-          boxShadow: "0 8px 24px rgba(20, 55, 69, 0.05)",
+          borderColor: "divider",
         }}
       >
         <Box>
-          <Typography variant="subtitle2" sx={{ color: "#173844", fontWeight: 820 }}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 820 }}>
             {selectedMode ? "Ready to continue" : "Choose a mode to continue"}
           </Typography>
           <Typography variant="caption" color="text.secondary">
-            Your selection stays in this page only and does not start the optimization engine.
+            Selection only; optimization does not start here.
           </Typography>
         </Box>
         <Button
           type="button"
           variant="contained"
           endIcon={<ArrowForwardRoundedIcon />}
-          disabled={!canContinue}
+          disabled={Boolean(activeRunReason) || !canContinue || (selectedMode === "comparison" && Boolean(comparisonReason))}
           onClick={continueFromModeSelection}
           sx={{
             minWidth: 154,
@@ -762,14 +847,16 @@ export default function OptimizationPage({
             borderRadius: "13px",
             fontWeight: 820,
             textTransform: "none",
-            background: "linear-gradient(100deg, #0f766e, #0d9488)",
-            boxShadow: "0 10px 24px rgba(15, 118, 110, 0.22)",
-            "&:hover": { background: "linear-gradient(100deg, #0b655f, #0b8178)" },
+            boxShadow: "0 10px 24px rgba(155,239,74,.12)",
           }}
         >
-          Continue
+          {selectedMode === "comparison"
+            ? "Configure Battery Comparison"
+            : selectedMode === "single"
+              ? "Configure Single Optimization"
+              : "Continue"}
         </Button>
-      </Paper>
+      </SurfaceCard>
     </Stack>
   );
 }

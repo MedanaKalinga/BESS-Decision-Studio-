@@ -14,6 +14,12 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from typing import Protocol
 
+from .optimization_checkpoint_service import (
+    decode_random_state,
+    encode_random_state,
+    json_safe_checkpoint,
+)
+
 from .single_simulation_service import (
     BESS_MAX_KWH,
     BESS_MIN_KWH,
@@ -54,6 +60,7 @@ class DatasetRecordLike(Protocol):
 
 
 ProgressCallback = Callable[[int, int, dict[str, object]], None]
+CheckpointCallback = Callable[[dict[str, object]], None]
 CancellationCheck = Callable[[], bool]
 FixedEvaluator = Callable[..., dict[str, object]]
 Clock = Callable[[], float]
@@ -413,7 +420,9 @@ def run_single_ga(
     elite_count: int,
     random_seed: int,
     progress_callback: ProgressCallback | None = None,
+    checkpoint_callback: CheckpointCallback | None = None,
     cancellation_requested: CancellationCheck | None = None,
+    resume_state: Mapping[str, object] | None = None,
     evaluator: FixedEvaluator = evaluate_fixed_bess,
     clock: Clock = time.perf_counter,
 ) -> dict[str, object]:
@@ -473,25 +482,110 @@ def run_single_ga(
     if should_cancel():
         raise OptimizationCancelled(0, 0)
 
-    rng = random.Random(seed)
-    population = [
-        [
-            rng.uniform(capacity_minimum, capacity_maximum),
-            rng.uniform(peak_minimum, peak_maximum),
-        ]
-        for _ in range(population_count)
-    ]
-
     started_at = _finite_number(clock(), "clock")
-    best_penalized_fitness = math.inf
-    best_penalized_result: dict[str, object] | None = None
-    best_feasible_fitness = math.inf
-    best_feasible_result: dict[str, object] | None = None
-    evaluations_completed = 0
-    generations_completed = 0
-    convergence_history: list[dict[str, float | int | bool]] = []
+    rng = random.Random(seed)
+    runtime_offset = 0.0
+    if resume_state is None:
+        population = [
+            [
+                rng.uniform(capacity_minimum, capacity_maximum),
+                rng.uniform(peak_minimum, peak_maximum),
+            ]
+            for _ in range(population_count)
+        ]
+        best_penalized_fitness = math.inf
+        best_penalized_result: dict[str, object] | None = None
+        best_feasible_fitness = math.inf
+        best_feasible_result: dict[str, object] | None = None
+        evaluations_completed = 0
+        generations_completed = 0
+        convergence_history: list[dict[str, float | int | bool]] = []
+    else:
+        try:
+            generations_completed = _strict_integer(
+                resume_state["last_completed_generation"],
+                "resume_state.last_completed_generation",
+            )
+            next_generation = _strict_integer(
+                resume_state["next_generation"],
+                "resume_state.next_generation",
+            )
+            evaluations_completed = _strict_integer(
+                resume_state["evaluations_completed"],
+                "resume_state.evaluations_completed",
+            )
+            stored_population = resume_state["population"]
+            stored_history = resume_state["convergence_history"]
+            rng.setstate(decode_random_state(resume_state["python_rng_state"]))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("The GA resume checkpoint is invalid.") from exc
+        if (
+            generations_completed < 0
+            or generations_completed >= generation_count
+            or next_generation != generations_completed + 1
+            or evaluations_completed != generations_completed * population_count
+            or not isinstance(stored_population, Sequence)
+            or len(stored_population) != population_count
+            or not isinstance(stored_history, Sequence)
+            or len(stored_history) != generations_completed
+        ):
+            raise ValueError("The GA resume checkpoint is inconsistent.")
+        population = []
+        for individual in stored_population:
+            if (
+                not isinstance(individual, Sequence)
+                or isinstance(individual, (str, bytes))
+                or len(individual) != 2
+            ):
+                raise ValueError("The GA resume population is invalid.")
+            capacity = _finite_number(individual[0], "resume_state.population.capacity")
+            peak_support = _finite_number(individual[1], "resume_state.population.peak_support")
+            if not capacity_minimum <= capacity <= capacity_maximum:
+                raise ValueError("The GA resume capacity is outside the configured bounds.")
+            if not peak_minimum <= peak_support <= peak_maximum:
+                raise ValueError("The GA resume peak support is outside the configured bounds.")
+            population.append([capacity, peak_support])
+        convergence_history = [dict(item) for item in stored_history if isinstance(item, Mapping)]
+        if len(convergence_history) != generations_completed:
+            raise ValueError("The GA resume convergence history is invalid.")
+        penalized = resume_state.get("best_penalized_result")
+        feasible = resume_state.get("best_feasible_result")
+        best_penalized_result = dict(penalized) if isinstance(penalized, Mapping) else None
+        best_feasible_result = dict(feasible) if isinstance(feasible, Mapping) else None
+        if best_penalized_result is None:
+            raise ValueError("The GA resume checkpoint has no best candidate.")
+        best_penalized_fitness = _result_number(best_penalized_result, "fitness_rs")
+        best_feasible_fitness = (
+            _result_number(best_feasible_result, "fitness_rs")
+            if best_feasible_result is not None
+            else math.inf
+        )
+        runtime_offset = _finite_number(
+            resume_state.get("runtime_seconds_elapsed", 0.0),
+            "resume_state.runtime_seconds_elapsed",
+        )
 
-    for generation_index in range(generation_count):
+    def publish_checkpoint() -> None:
+        if checkpoint_callback is None:
+            return
+        elapsed = max(_finite_number(clock(), "clock") - started_at, 0.0)
+        checkpoint_callback(
+            json_safe_checkpoint(
+                {
+                    "last_completed_generation": generations_completed,
+                    "next_generation": generations_completed + 1,
+                    "population": population,
+                    "python_rng_state": encode_random_state(rng.getstate()),
+                    "best_penalized_result": best_penalized_result,
+                    "best_feasible_result": best_feasible_result,
+                    "convergence_history": convergence_history,
+                    "evaluations_completed": evaluations_completed,
+                    "runtime_seconds_elapsed": runtime_offset + elapsed,
+                }
+            )
+        )
+
+    for generation_index in range(generations_completed, generation_count):
         if should_cancel():
             raise OptimizationCancelled(
                 generations_completed,
@@ -583,6 +677,7 @@ def run_single_ga(
         )
 
         if generation_index + 1 < generation_count and should_cancel():
+            publish_checkpoint()
             raise OptimizationCancelled(
                 generations_completed,
                 evaluations_completed,
@@ -592,6 +687,7 @@ def run_single_ga(
         # evaluation.  Omitting that unused final reproduction changes neither
         # candidate evaluations nor the completed result.
         if generation_index + 1 == generation_count:
+            publish_checkpoint()
             continue
 
         sorted_indices = _rank_indices_by_fitness(fitness_values)
@@ -633,9 +729,15 @@ def run_single_ga(
             if len(new_population) < population_count:
                 new_population.append(child_two)
         population = new_population
+        publish_checkpoint()
+        if should_cancel():
+            raise OptimizationCancelled(
+                generations_completed,
+                evaluations_completed,
+            )
 
     finished_at = _finite_number(clock(), "clock")
-    runtime_seconds = max(finished_at - started_at, 0.0)
+    runtime_seconds = runtime_offset + max(finished_at - started_at, 0.0)
     selected_result = best_feasible_result or best_penalized_result
     if selected_result is None:  # pragma: no cover - validated loop invariants
         raise RuntimeError("GA completed without evaluating a candidate.")

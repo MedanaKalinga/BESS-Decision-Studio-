@@ -1,60 +1,61 @@
+SCIENTIFIC_CONFIGURATION_VERSION = 3
+
+
 DEFAULT_BATTERY_TYPES: list[dict[str, str | int | float]] = [
     {
         "name": "Low-cost",
-        "price_rs_per_kwh": 44000,
-        "rated_cycle_life": 3000,
+        "price_rs_per_kwh": 45000,
+        "rated_cycle_life": 5000,
         "eta_ch": 0.92,
         "eta_dis": 0.92,
-        "weight_density_kg_per_kwh": 8.5,
-        "warranty_years": 5.0,
-    },
-    {
-        "name": "Medium-low",
-        "price_rs_per_kwh": 56000,
-        "rated_cycle_life": 5000,
-        "eta_ch": 0.935,
-        "eta_dis": 0.935,
-        "weight_density_kg_per_kwh": 8.0,
-        "warranty_years": 7.0,
-    },
-    {
-        "name": "Medium",
-        "price_rs_per_kwh": 68000,
-        "rated_cycle_life": 7000,
-        "eta_ch": 0.95,
-        "eta_dis": 0.95,
-        "weight_density_kg_per_kwh": 7.5,
+        "weight_density_kg_per_kwh": 10.0,
         "warranty_years": 10.0,
     },
     {
-        "name": "Medium-high",
-        "price_rs_per_kwh": 80000,
-        "rated_cycle_life": 9000,
+        "name": "Medium-low",
+        "price_rs_per_kwh": 55000,
+        "rated_cycle_life": 6500,
+        "eta_ch": 0.935,
+        "eta_dis": 0.935,
+        "weight_density_kg_per_kwh": 8.5,
+        "warranty_years": 10.0,
+    },
+    {
+        "name": "Medium",
+        "price_rs_per_kwh": 65000,
+        "rated_cycle_life": 8000,
+        "eta_ch": 0.95,
+        "eta_dis": 0.95,
+        "weight_density_kg_per_kwh": 8.0,
+        "warranty_years": 12.0,
+    },
+    {
+        "name": "High",
+        "price_rs_per_kwh": 75000,
+        "rated_cycle_life": 9500,
         "eta_ch": 0.96,
         "eta_dis": 0.96,
-        "weight_density_kg_per_kwh": 7.0,
-        "warranty_years": 12.0,
+        "weight_density_kg_per_kwh": 8.0,
+        "warranty_years": 15.0,
     },
 ]
 
 
 DEFAULT_CRITERIA: list[dict[str, str]] = [
-    {"name": "total_annual_cost_rs", "direction": "minimize"},
+    {"name": "total_annual_cost_Rs", "direction": "minimize"},
     {"name": "cycle_based_life_years", "direction": "maximize"},
     {"name": "round_trip_efficiency", "direction": "maximize"},
     {"name": "weight_density_kg_per_kwh", "direction": "minimize"},
-    {"name": "annual_om_cost_rs", "direction": "minimize"},
     {"name": "warranty_years", "direction": "maximize"},
 ]
 
 
 DEFAULT_AHP_MATRIX: list[list[float]] = [
-    [1.0, 1.0, 4.0, 3.0, 4.0, 5.0],
-    [1.0, 1.0, 4.0, 2.0, 2.0, 3.0],
-    [1 / 4, 1 / 4, 1.0, 1.0, 1 / 2, 1.0],
-    [1 / 3, 1 / 2, 1.0, 1.0, 1.0, 2.0],
-    [1 / 4, 1 / 2, 2.0, 1.0, 1.0, 1.0],
-    [1 / 5, 1 / 3, 1.0, 1 / 2, 1.0, 1.0],
+    [1.0, 1.0, 4.0, 3.0, 5.0],
+    [1.0, 1.0, 4.0, 2.0, 3.0],
+    [1 / 4, 1 / 4, 1.0, 1.0, 1.0],
+    [1 / 3, 1 / 2, 1.0, 1.0, 2.0],
+    [1 / 5, 1 / 3, 1.0, 1 / 2, 1.0],
 ]
 
 

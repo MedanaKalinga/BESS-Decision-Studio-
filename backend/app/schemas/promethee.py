@@ -23,7 +23,9 @@ class PrometheeAlternative(BaseModel):
     cycle_based_life_years: float = Field(ge=0)
     round_trip_efficiency: float = Field(gt=0, le=1)
     weight_density_kg_per_kwh: float = Field(ge=0)
-    annual_om_cost_rs: float = Field(ge=0)
+    # Retained as optional result metadata for older API clients. It is not a
+    # PROMETHEE decision criterion in scientific configuration v3.
+    annual_om_cost_rs: float | None = Field(default=None, ge=0)
     warranty_years: float = Field(ge=0)
 
     @model_validator(mode="after")
@@ -50,7 +52,7 @@ class PrometheeCalculationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
 
     alternatives: list[PrometheeAlternative] = Field(min_length=2)
-    ahp_weights: list[float] = Field(min_length=6, max_length=6)
+    ahp_weights: list[float] = Field(min_length=5, max_length=5)
     accepted_ahp_revision: int | str | None = None
 
     @model_validator(mode="after")

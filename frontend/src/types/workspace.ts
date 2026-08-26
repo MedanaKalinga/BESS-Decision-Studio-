@@ -3,10 +3,23 @@ export interface WorkspaceDatasetSummary {
   filename: string;
   rowCount: number;
   datasetType: "normal_year" | "leap_year" | "partial" | string;
+  status: "ready" | "expired";
   startDate: string;
   endDate: string;
   annualPvEnergyKwh: number;
   annualEvEnergyKwh: number;
+  pvPeakKw: number;
+  evPeakKw: number;
+  intervalMinutes: number;
+  durationDays: number | null;
+  timestampsGenerated: boolean;
+  notice: string | null;
+  detectedColumns: {
+    timestamp: string | null;
+    pv: string;
+    ev: string;
+    tariff: string | null;
+  };
 }
 
 export interface WorkspaceDispatchPeriod {
@@ -45,6 +58,13 @@ export interface ComparisonAHPWorkspaceState {
   accepted: boolean;
   revision: number;
   calculatedAt: string | null;
+  acceptedAt?: string | null;
+  projectId?: string;
+  linkedDatasetId?: string | null;
+  linkedComparisonRevision?: string | null;
+  scientificConfigurationVersion?: number;
+  incompatible?: boolean;
+  incompatibilityReason?: string | null;
 }
 
 export interface ComparisonBatteryConfiguration {
@@ -91,6 +111,7 @@ export interface ComparisonOptimizationConfiguration {
   gaSettings: ComparisonGASettings;
   economicSettings: ComparisonEconomicSettings;
   savedAt: string | null;
+  workflowStep?: number;
 }
 
 export interface ComparisonBatteryResult {
@@ -106,6 +127,7 @@ export interface ComparisonBatteryResult {
   total_fitness_evaluations: number;
   runtime_seconds: number;
   cycle_based_life_years: number;
+  equivalent_cycles_per_year?: number;
   round_trip_efficiency: number;
   weight_density_kg_per_kwh: number;
   warranty_years: number;
@@ -138,6 +160,8 @@ export interface ComparisonOptimizationWorkspaceState {
   stale: boolean;
   finalResult: ComparisonOptimizationFinalResult;
   completedAt: string;
+  projectId?: string;
+  datasetId?: string;
 }
 
 export type ComparisonJobLifecycleStatus =
@@ -249,6 +273,12 @@ export interface PrometheeWorkspaceState {
   batteryConfigurationSignature: string;
   ahpRevision: number;
   calculatedAt: string;
+  stale?: boolean;
+  projectId?: string;
+  datasetId?: string | null;
+  scientificConfigurationVersion?: number;
+  incompatible?: boolean;
+  incompatibilityReason?: string | null;
 }
 
 export interface SingleBatteryConfigurationSnapshot {
@@ -432,6 +462,10 @@ export interface OperationalProfileDailySummary {
 
 export interface PersistedWorkspaceState {
   version: 1;
+  projectId?: string;
+  activeDatasetId?: string | null;
+  persistenceRevision?: number;
+  updatedAt?: string;
   activePage: string;
   dataset: WorkspaceDatasetSummary | null;
   dispatchStrategy: WorkspaceDispatchStrategy;
@@ -442,6 +476,7 @@ export interface PersistedWorkspaceState {
   selectedMode: "single" | "comparison" | null;
   activeOptimizationStep: string | null;
   operationalProfileDate: string | null;
+  datasetExplorerDate: string | null;
   comparisonAhp: ComparisonAHPWorkspaceState | null;
   comparisonConfiguration: ComparisonOptimizationConfiguration | null;
   comparisonRunState: ComparisonRunWorkspaceState;

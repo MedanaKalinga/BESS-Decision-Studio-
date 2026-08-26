@@ -46,6 +46,7 @@ import type {
 
 interface SingleOptimizationSetupProps {
   battery: SingleBatteryConfigurationSnapshot;
+  initialSetup?: SingleOptimizationSetupSnapshot | null;
   dataset: WorkspaceDatasetSummary | null;
   dispatchStrategy: WorkspaceDispatchStrategy;
   onBack: () => void;
@@ -93,7 +94,30 @@ const RECOMMENDED_SETTINGS: SetupDraft = {
   residualValueEnabled: false,
 };
 
-const steps = ["Mode", "Battery", "Setup", "Run", "Results"];
+export function setupSnapshotToDraft(
+  setup: SingleOptimizationSetupSnapshot | null | undefined,
+): SetupDraft {
+  if (!setup) return { ...RECOMMENDED_SETTINGS };
+  return {
+    minCapacity: String(setup.minimumBessCapacityKwh),
+    maxCapacity: String(setup.maximumBessCapacityKwh),
+    minPeakSupport: String(setup.minimumPeakSupportPct),
+    maxPeakSupport: String(setup.maximumPeakSupportPct),
+    populationSize: String(setup.populationSize),
+    generations: String(setup.generations),
+    mutationProbability: String(setup.mutationProbability),
+    eliteCount: String(setup.eliteCount),
+    randomSeed: String(setup.randomSeed),
+    projectLife: String(setup.projectLifeYears),
+    discountRate: String(setup.discountRate * 100),
+    exportTariff: String(setup.exportTariffRsPerKwh),
+    annualOmPercentage: String(setup.annualOmFraction * 100),
+    replacementCostPercentage: String(setup.replacementCostFraction * 100),
+    residualValueEnabled: setup.residualValueEnabled,
+  };
+}
+
+const steps = ["Battery", "Bounds", "GA Settings", "Economics", "Dispatch", "Review", "Run", "Result"];
 
 const energyFormatter = new Intl.NumberFormat("en-LK", {
   maximumFractionDigits: 1,
@@ -257,12 +281,31 @@ function SetupInput({
       sx={{
         "& .MuiOutlinedInput-root": {
           borderRadius: "13px",
-          bgcolor: "rgba(255,255,255,0.92)",
+          bgcolor: "rgba(7,17,29,0.72)",
+          color: "text.primary",
           transition: "box-shadow 180ms ease, transform 180ms ease",
+          "& .MuiOutlinedInput-notchedOutline": {
+            borderColor: "rgba(148,166,186,0.32)",
+          },
+          "&:hover .MuiOutlinedInput-notchedOutline": {
+            borderColor: "rgba(155,239,74,0.5)",
+          },
           "&.Mui-focused": {
-            boxShadow: "0 8px 24px rgba(15,118,110,0.08)",
+            boxShadow: "0 8px 24px rgba(155,239,74,0.1)",
             transform: "translateY(-1px)",
           },
+        },
+        "& .MuiInputBase-input": {
+          color: "#F4F8FC",
+          WebkitTextFillColor: "#F4F8FC",
+          fontWeight: 700,
+          colorScheme: "dark",
+        },
+        "& .MuiInputLabel-root": { color: "#94A6BA" },
+        "& .MuiInputLabel-root.Mui-focused": { color: "#9BEF4A" },
+        "& .MuiInputLabel-root.Mui-error": { color: "error.main" },
+        "& .MuiInputAdornment-root, & .MuiInputAdornment-root .MuiTypography-root": {
+          color: "#94A6BA",
         },
         "& .MuiFormHelperText-root": { mx: 0.3, minHeight: 20 },
         "@media (prefers-reduced-motion: reduce)": {
@@ -284,6 +327,7 @@ function SummaryRow({ label, value }: { label: string; value: string }) {
 
 export default function SingleOptimizationSetup({
   battery,
+  initialSetup,
   dataset,
   dispatchStrategy,
   onBack,
@@ -291,7 +335,7 @@ export default function SingleOptimizationSetup({
   onReviewDispatchStrategy,
   onReadyToRun,
 }: SingleOptimizationSetupProps) {
-  const [draft, setDraft] = useState<SetupDraft>({ ...RECOMMENDED_SETTINGS });
+  const [draft, setDraft] = useState<SetupDraft>(() => setupSnapshotToDraft(initialSetup));
   const [advancedExpanded, setAdvancedExpanded] = useState(false);
   const [readyConfirmed, setReadyConfirmed] = useState(false);
 
@@ -372,7 +416,7 @@ export default function SingleOptimizationSetup({
           py: { xs: 2.75, sm: 3.5 },
           borderRadius: "28px",
           color: "#fff",
-          background: "linear-gradient(118deg, #073e49 0%, #08766f 52%, #1669a9 125%)",
+          background: "linear-gradient(118deg,#0D1D2D,#12263A)",
           boxShadow: "0 22px 52px rgba(7,62,73,0.2)",
           "&::after": {
             content: '\"\"',
@@ -396,16 +440,16 @@ export default function SingleOptimizationSetup({
                 Prepare the optimization run
               </Typography>
               <Typography sx={{ mt: 1, color: "rgba(255,255,255,0.79)", lineHeight: 1.65 }}>
-                Connect the study inputs, define search limits, and review the assumptions for {battery.batteryName}. No GA is executed on this page.
+                Set inputs, bounds, and assumptions for {battery.batteryName}.
               </Typography>
             </Box>
             <Chip icon={<ScienceRoundedIcon />} label="Setup only · React state" sx={{ color: "#fff", bgcolor: "rgba(255,255,255,0.13)", fontWeight: 780, "& .MuiChip-icon": { color: "#99f6e4" } }} />
           </Stack>
 
-          <Box sx={{ mt: 3, display: "grid", gridTemplateColumns: { xs: "repeat(5, minmax(64px, 1fr))", sm: "repeat(5, 1fr)" }, gap: { xs: 0.6, sm: 1.25 }, overflowX: "auto" }}>
+          <Box sx={{ mt: 3, display: "grid", gridTemplateColumns: "repeat(8,minmax(72px,1fr))", gap: { xs: 0.6, sm: 1 }, overflowX: "auto" }}>
             {steps.map((step, index) => {
-              const completed = index < 2;
-              const active = index === 2;
+              const completed = index < 5;
+              const active = index === 5;
               return (
                 <Stack key={step} spacing={0.75} sx={{ minWidth: 62 }}>
                   <Box sx={{ height: 4, borderRadius: 99, bgcolor: completed || active ? active ? "#5eead4" : "#a7f3d0" : "rgba(255,255,255,0.18)" }} />
@@ -427,15 +471,15 @@ export default function SingleOptimizationSetup({
       {readyConfirmed && (
         <Alert severity="success" icon={<CheckCircleRoundedIcon />} sx={{ borderRadius: "18px" }}>
           <Typography variant="subtitle2" sx={{ fontWeight: 850 }}>Optimization setup confirmed in React state</Typography>
-          <Typography variant="body2">The configuration is ready for the future Run step. No backend GA request was sent.</Typography>
+          <Typography variant="body2">Ready for the Run step; no backend request was sent.</Typography>
         </Alert>
       )}
 
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", xl: "minmax(0, 1.8fr) minmax(330px, 0.78fr)" }, gap: 2.5, alignItems: "start" }}>
         <Stack spacing={2.5}>
           <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "repeat(2, minmax(0, 1fr))" }, gap: 2.5 }}>
-            <Paper variant="outlined" sx={{ p: { xs: 2.1, sm: 2.5 }, borderRadius: "24px", borderColor: dataset ? "#b7e4dc" : "#f0c67a", background: dataset ? "linear-gradient(140deg, #ffffff, #f0fdfa)" : "linear-gradient(140deg, #fff, #fffbeb)", boxShadow: "0 14px 36px rgba(15,23,42,0.05)" }}>
-              <SectionTitle icon={DataUsageRoundedIcon} eyebrow="Study input" title="Dataset" description="The PV and EV time-series used by the optimization." accent={dataset ? "teal" : "amber"} />
+            <Paper variant="outlined" sx={{ p: { xs: 2.1, sm: 2.5 }, borderRadius: "24px", borderColor: dataset ? "rgba(155,239,74,.36)" : "warning.main", background: dataset ? "rgba(155,239,74,.04)" : "rgba(245,167,66,.045)" }}>
+              <SectionTitle icon={DataUsageRoundedIcon} eyebrow="Study input" title="Dataset" description="PV and EV input data." accent={dataset ? "teal" : "amber"} />
               {dataset ? (
                 <Stack spacing={1.15} sx={{ mt: 2.25 }}>
                   <Stack direction="row" spacing={1} sx={{ justifyContent: "space-between", alignItems: "center" }}>
@@ -458,12 +502,12 @@ export default function SingleOptimizationSetup({
               </Button>
             </Paper>
 
-            <Paper variant="outlined" sx={{ p: { xs: 2.1, sm: 2.5 }, borderRadius: "24px", borderColor: dispatchStrategy.status === "Modified Strategy" ? "#f0c67a" : "#c7ddf8", background: "linear-gradient(140deg, #ffffff, #eff6ff)", boxShadow: "0 14px 36px rgba(15,23,42,0.05)" }}>
-              <SectionTitle icon={RouteRoundedIcon} eyebrow="Control policy" title="Dispatch Strategy" description="The period rules applied when evaluating each candidate solution." accent="blue" />
+            <Paper variant="outlined" sx={{ p: { xs: 2.1, sm: 2.5 }, borderRadius: "24px", borderColor: dispatchStrategy.status === "Modified Strategy" ? "warning.main" : "rgba(76,141,255,.36)", background: "rgba(76,141,255,.04)" }}>
+              <SectionTitle icon={RouteRoundedIcon} eyebrow="Control policy" title="Dispatch Strategy" description="Candidate dispatch rules." accent="blue" />
               <Chip size="small" icon={dispatchStrategy.status === "Reference Strategy" ? <CheckCircleRoundedIcon /> : <TuneRoundedIcon />} label={dispatchStrategy.status} sx={{ mt: 1.8, fontWeight: 800, bgcolor: dispatchStrategy.status === "Reference Strategy" ? "#dcfce7" : "#fef3c7", color: dispatchStrategy.status === "Reference Strategy" ? "#166534" : "#92400e" }} />
               <Box sx={{ mt: 1.5, display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 1 }}>
                 {dispatchStrategy.periods.slice(0, 4).map((period) => (
-                  <Paper key={`${period.name}-${period.start}`} elevation={0} sx={{ p: 1.15, borderRadius: "13px", bgcolor: "rgba(255,255,255,0.82)", border: "1px solid #dbeafe" }}>
+                  <Paper key={`${period.name}-${period.start}`} elevation={0} sx={{ p: 1.15, borderRadius: "13px", bgcolor: "rgba(255,255,255,.025)", border: "1px solid", borderColor: "divider" }}>
                     <Typography variant="caption" sx={{ display: "block", color: "#1d4ed8", fontWeight: 850 }}>{period.name}</Typography>
                     <Typography variant="body2" sx={{ mt: 0.25, fontWeight: 780 }}>{period.start}–{period.end}</Typography>
                     <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -479,8 +523,8 @@ export default function SingleOptimizationSetup({
           </Box>
 
           <Paper variant="outlined" sx={{ overflow: "hidden", borderRadius: "24px", borderColor: "#cce5df", boxShadow: "0 14px 36px rgba(15,118,110,0.05)" }}>
-            <Box sx={{ p: { xs: 2.1, sm: 2.5 }, borderBottom: "1px solid #d7eee9", background: "linear-gradient(120deg, #ecfdf5, #f0fdfa 55%, #eff6ff)" }}>
-              <SectionTitle icon={InsightsRoundedIcon} eyebrow="GA search space" title="Optimization Search Bounds" description="Define the feasible ranges for BESS size and peak-support percentage." />
+            <Box sx={{ p: { xs: 2.1, sm: 2.5 }, borderBottom: "1px solid", borderColor: "divider", background: "linear-gradient(120deg,rgba(155,239,74,.05),rgba(76,141,255,.04))" }}>
+              <SectionTitle icon={InsightsRoundedIcon} eyebrow="GA search space" title="Optimization Search Bounds" description="Capacity and peak-support ranges." />
             </Box>
             <Box sx={{ p: { xs: 2.1, sm: 2.5 } }}>
               <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))" }, gap: 1.5 }}>
@@ -503,10 +547,10 @@ export default function SingleOptimizationSetup({
           </Paper>
 
           <Accordion expanded={advancedExpanded} onChange={(_, expanded) => setAdvancedExpanded(expanded)} disableGutters elevation={0} sx={{ border: "1px solid #d9e3eb", borderRadius: "24px !important", overflow: "hidden", "&::before": { display: "none" } }}>
-            <AccordionSummary expandIcon={<ExpandMoreRoundedIcon />} sx={{ px: { xs: 2.1, sm: 2.5 }, py: 1.2, background: "linear-gradient(120deg, #f8fafc, #eef2ff)", "& .MuiAccordionSummary-content": { my: 1 } }}>
-              <SectionTitle icon={SettingsSuggestRoundedIcon} eyebrow="Advanced controls" title="Advanced Genetic Algorithm Settings" description="Recommended values are preloaded. Adjust these only when you need finer search control." accent="blue" />
+            <AccordionSummary expandIcon={<ExpandMoreRoundedIcon />} sx={{ px: { xs: 2.1, sm: 2.5 }, py: 1.2, background: "rgba(76,141,255,.035)", "& .MuiAccordionSummary-content": { my: 1 } }}>
+              <SectionTitle icon={SettingsSuggestRoundedIcon} eyebrow="Advanced controls" title="Advanced Genetic Algorithm Settings" description="Recommended search controls are preloaded." accent="blue" />
             </AccordionSummary>
-            <AccordionDetails sx={{ p: { xs: 2.1, sm: 2.5 }, borderTop: "1px solid #e2e8f0", bgcolor: "#fbfdff" }}>
+            <AccordionDetails sx={{ p: { xs: 2.1, sm: 2.5 }, borderTop: "1px solid", borderColor: "divider", bgcolor: "background.paper" }}>
               <Alert severity="info" sx={{ mb: 2, borderRadius: "14px" }}>These parameters change GA search behavior, not the scientific objective definition.</Alert>
               <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))" }, gap: 1.5 }}>
                 <SetupInput label="Population size" value={draft.populationSize} error={errors.populationSize} onChange={(value) => update("populationSize", value)} />
@@ -525,8 +569,8 @@ export default function SingleOptimizationSetup({
           </Accordion>
 
           <Paper variant="outlined" sx={{ overflow: "hidden", borderRadius: "24px", borderColor: "#ecd9ac" }}>
-            <Box sx={{ p: { xs: 2.1, sm: 2.5 }, borderBottom: "1px solid #f1e5c5", background: "linear-gradient(120deg, #fffbeb, #fff 60%, #f0fdfa)" }}>
-              <SectionTitle icon={SavingsRoundedIcon} eyebrow="Financial assumptions" title="Economic Settings" description="Set the project horizon, discounting, and lifecycle cost assumptions." accent="amber" />
+            <Box sx={{ p: { xs: 2.1, sm: 2.5 }, borderBottom: "1px solid", borderColor: "divider", background: "linear-gradient(120deg,rgba(245,167,66,.045),rgba(155,239,74,.03))" }}>
+              <SectionTitle icon={SavingsRoundedIcon} eyebrow="Financial assumptions" title="Economic Settings" description="Project and lifecycle-cost assumptions." accent="amber" />
             </Box>
             <Box sx={{ p: { xs: 2.1, sm: 2.5 } }}>
               <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))", lg: "repeat(3, minmax(0, 1fr))" }, gap: 1.5 }}>
@@ -537,7 +581,7 @@ export default function SingleOptimizationSetup({
                 <SetupInput label="Replacement cost percentage" value={draft.replacementCostPercentage} error={errors.replacementCostPercentage} suffix="%" step="0.1" onChange={(value) => update("replacementCostPercentage", value)} />
               </Box>
               <Box sx={{ mt: 1, display: "grid", gridTemplateColumns: { xs: "1fr", sm: "minmax(260px, 1fr) minmax(240px, 0.8fr)" }, gap: 1.5 }}>
-                <Paper elevation={0} sx={{ p: 1.5, borderRadius: "16px", bgcolor: "#fffbeb", border: "1px solid #fde7ad" }}>
+                <Paper elevation={0} sx={{ p: 1.5, borderRadius: "16px", bgcolor: "rgba(245,167,66,.04)", border: "1px solid", borderColor: "rgba(245,167,66,.25)" }}>
                   <FormControlLabel
                     control={<Switch checked={draft.residualValueEnabled} onChange={(event) => { setDraft((current) => ({ ...current, residualValueEnabled: event.target.checked })); setReadyConfirmed(false); }} color="success" />}
                     label={<Box><Typography variant="body2" sx={{ fontWeight: 820 }}>Residual value enabled</Typography><Typography variant="caption" color="text.secondary">Include residual value in the future economic calculation.</Typography></Box>}
@@ -548,7 +592,7 @@ export default function SingleOptimizationSetup({
                   <Typography variant="caption" sx={{ color: "#a7f3d0", fontWeight: 800 }}>DIRECT DISCOUNT RATE</Typography>
                   <Typography variant="h5" sx={{ mt: 0.35, fontWeight: 880 }}>{!errors.discountRate ? `${draft.discountRate}%` : "—"}</Typography>
                   <Typography variant="caption" sx={{ display: "block", mt: 0.35, color: "rgba(255,255,255,0.78)", lineHeight: 1.45 }}>
-                    This discount rate is used directly for present-value and annualization calculations.
+                    Used directly for present value and annualization.
                   </Typography>
                 </Paper>
               </Box>
@@ -556,14 +600,14 @@ export default function SingleOptimizationSetup({
           </Paper>
         </Stack>
 
-        <Paper component="aside" elevation={0} sx={{ position: { xl: "sticky" }, top: { xl: 92 }, overflow: "hidden", borderRadius: "24px", bgcolor: "#102a36", color: "#fff", boxShadow: "0 22px 52px rgba(15,42,54,0.19)" }}>
+        <Paper component="aside" elevation={0} sx={{ position: { xl: "sticky" }, top: { xl: 92 }, overflow: "hidden", borderRadius: "24px", bgcolor: "#081522", border: "1px solid", borderColor: "divider", boxShadow: "0 22px 52px rgba(0,0,0,.24)" }}>
           <Box sx={{ p: 2.5, borderBottom: "1px solid rgba(255,255,255,0.09)", background: "linear-gradient(135deg, rgba(20,184,166,0.18), rgba(37,99,235,0.15))" }}>
             <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
               <AutoAwesomeRoundedIcon sx={{ color: "#5eead4" }} />
               <Typography variant="overline" sx={{ color: "#5eead4", fontWeight: 850, letterSpacing: "0.11em" }}>RUN REVIEW</Typography>
             </Stack>
             <Typography variant="h5" sx={{ mt: 0.55, fontWeight: 880 }}>Ready-check summary</Typography>
-            <Typography variant="caption" sx={{ color: "#94a3b8" }}>Review the working setup before the future Run step.</Typography>
+            <Typography variant="caption" sx={{ color: "#94a3b8" }}>Review before running.</Typography>
           </Box>
           <Stack spacing={1.2} sx={{ p: 2.5 }}>
             <SummaryRow label="Selected battery" value={battery.batteryName} />
@@ -583,25 +627,25 @@ export default function SingleOptimizationSetup({
               Ready to Run Optimization
             </Button>
             <Typography variant="caption" sx={{ display: "block", mt: 1.1, color: "#94a3b8", textAlign: "center", lineHeight: 1.45 }}>
-              Confirms local React state only. No GA request will be sent.
+              Confirms locally; no GA request is sent.
             </Typography>
           </Box>
         </Paper>
       </Box>
 
-      <Paper variant="outlined" sx={{ p: { xs: 1.5, sm: 1.8 }, borderRadius: "20px", borderColor: "#dce5eb" }}>
+      <Paper variant="outlined" sx={{ position: "sticky", bottom: 12, zIndex: 4, p: { xs: 1.5, sm: 1.8 }, borderRadius: "20px", borderColor: "divider", bgcolor: "rgba(8,21,34,.96)", backdropFilter: "blur(12px)" }}>
         <Stack direction={{ xs: "column", sm: "row" }} spacing={1.25} sx={{ justifyContent: "space-between" }}>
           <Button startIcon={<ArrowBackRoundedIcon />} onClick={onBack} sx={{ borderRadius: "12px" }}>Back</Button>
           <Stack direction={{ xs: "column", sm: "row" }} spacing={1.2}>
             <Button variant="outlined" startIcon={<RestartAltRoundedIcon />} onClick={restoreRecommended} sx={{ borderRadius: "12px" }}>Restore Recommended Settings</Button>
-            <Button variant="contained" endIcon={<ArrowForwardRoundedIcon />} disabled={!canConfirm} onClick={confirmSetup} sx={{ borderRadius: "12px", background: "linear-gradient(100deg, #0f766e, #2563eb)" }}>Ready to Run Optimization</Button>
+            <Button variant="contained" endIcon={<ArrowForwardRoundedIcon />} disabled={!canConfirm} onClick={confirmSetup} sx={{ borderRadius: "12px", background: "linear-gradient(100deg, #0f766e, #2563eb)" }}>Start Optimization</Button>
           </Stack>
         </Stack>
       </Paper>
 
       <Stack direction="row" spacing={1} sx={{ alignItems: "center", justifyContent: "center", color: "text.secondary" }}>
         <BatteryChargingFullRoundedIcon fontSize="small" />
-        <Typography variant="caption">No GA, dispatch simulation, AHP, or PROMETHEE calculation is triggered by this setup page.</Typography>
+        <Typography variant="caption">Setup only; no calculations run.</Typography>
         <BoltRoundedIcon fontSize="small" />
         <CurrencyRupeeRoundedIcon fontSize="small" />
         <LoopRoundedIcon fontSize="small" />

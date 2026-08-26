@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 class AHPCalculationRequest(BaseModel):
     matrix: list[list[float]] = Field(
-        description="Six-by-six AHP pairwise-comparison matrix."
+        description="Five-by-five AHP pairwise-comparison matrix."
     )
 
 

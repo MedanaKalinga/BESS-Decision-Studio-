@@ -19,7 +19,7 @@ import {
 import { hasPrometheePrerequisites, isPrometheeResultStale } from "../src/lib/comparisonResults.ts";
 import { readPersistedWorkspaceState, writePersistedWorkspaceState } from "../src/lib/workspacePersistence.ts";
 
-const catalogue = ["Low-cost", "Medium-low", "Medium", "Medium-high"].map((name, index) => ({
+const catalogue = ["Low-cost", "Medium-low", "Medium", "High"].map((name, index) => ({
   name,
   price_rs_per_kwh: 44_000 + index * 5_000,
   rated_cycle_life: 3_000 + index * 500,
@@ -116,7 +116,7 @@ test("request submits exactly enabled batteries with the backend field contract"
   const initial = createDefaultComparisonConfiguration(catalogue);
   const configuration = reviseComparisonConfiguration(initial, { batteries: initial.batteries.map((entry, index) => ({ ...entry, enabled: index !== 1 })) }, true);
   const request = mapComparisonRunRequest(configuration, dataset, dispatch);
-  assert.deepEqual(request.batteries.map((entry) => entry.battery.name), ["Low-cost", "Medium", "Medium-high"]);
+  assert.deepEqual(request.batteries.map((entry) => entry.battery.name), ["Low-cost", "Medium", "High"]);
   assert.ok(request.batteries.every((entry) => entry.enabled === true));
   assert.equal(request.dataset_id, "dataset-1");
   assert.equal(request.dispatch_strategy_status, "Reference Strategy");
@@ -191,8 +191,13 @@ test("configuration changes mark a completed Stage 1 snapshot stale", () => {
   const completedJob = job({ status: "completed", final_result: finalResult(2) });
   const snapshot = buildCompletedComparisonSnapshot(completedJob, { ...INITIAL_COMPARISON_RUN_STATE, submittedInputSignature: signature });
   const changed = reviseComparisonConfiguration(configuration, { maximumBessCapacityKwh: 6500 });
-  const synchronized = synchronizeComparisonSnapshot(snapshot, buildComparisonInputSignature(changed, dataset, dispatch));
-  assert.equal(synchronized?.stale, true);
+  const staleSnapshot = synchronizeComparisonSnapshot(snapshot, buildComparisonInputSignature(changed, dataset, dispatch));
+  assert.equal(staleSnapshot?.stale, true);
+
+  const restored = reviseComparisonConfiguration(changed, { maximumBessCapacityKwh: configuration.maximumBessCapacityKwh });
+  const stillStale = synchronizeComparisonSnapshot(staleSnapshot, buildComparisonInputSignature(restored, dataset, dispatch));
+  assert.equal(restored.maximumBessCapacityKwh, configuration.maximumBessCapacityKwh);
+  assert.equal(stillStale?.stale, true);
 });
 
 test("a stale Stage 1 snapshot also makes PROMETHEE stale", () => {
@@ -226,7 +231,7 @@ test("fewer than two feasible alternatives blocks PROMETHEE while retaining infe
   const signature = buildComparisonInputSignature(configuration, dataset, dispatch);
   const completedJob = job({ status: "completed", final_result: finalResult(1) });
   const snapshot = buildCompletedComparisonSnapshot(completedJob, { ...INITIAL_COMPARISON_RUN_STATE, submittedInputSignature: signature });
-  const ahp = { matrix: Array.from({ length: 6 }, () => Array(6).fill(1)), calculation: { columnSums: [], normalizedMatrix: [], weights: Array(6).fill(1 / 6), lambdaMax: 6, consistencyIndex: 0, randomIndex: 1.24, consistencyRatio: 0, status: "ACCEPTABLE" as const }, accepted: true, revision: 2, calculatedAt: "now" };
+  const ahp = { matrix: Array.from({ length: 5 }, () => Array(5).fill(1)), calculation: { columnSums: Array(5).fill(5), normalizedMatrix: Array.from({ length: 5 }, () => Array(5).fill(1 / 5)), weights: Array(5).fill(1 / 5), lambdaMax: 5, consistencyIndex: 0, randomIndex: 1.12, consistencyRatio: 0, status: "ACCEPTABLE" as const }, accepted: true, revision: 2, calculatedAt: "now" };
   assert.equal(snapshot.finalResult.battery_results.length, 3);
   assert.equal(snapshot.finalResult.battery_results.filter((entry) => !entry.is_feasible).length, 2);
   assert.equal(hasPrometheePrerequisites(snapshot, ahp), false);

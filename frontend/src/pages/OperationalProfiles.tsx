@@ -126,25 +126,25 @@ function InteractiveStepChart({
   }
 
   return (
-    <Paper component="section" variant="outlined" sx={{ overflow: "hidden", borderRadius: "24px", borderColor: "#d8e7eb", boxShadow: "0 14px 38px rgba(15,65,77,0.055)", transition: "box-shadow 180ms ease", "&:hover": { boxShadow: "0 20px 46px rgba(15,65,77,0.09)" } }}>
-      <Box sx={{ px: { xs: 2, sm: 2.6 }, py: 2.1, background: "linear-gradient(120deg, #f0fdfa, #eff6ff 70%, #fff)" }}>
+    <Paper component="section" variant="outlined" sx={{ overflow: "hidden", borderRadius: "24px", borderColor: "divider", bgcolor: "#0D1D2D", boxShadow: "0 14px 38px rgba(0,0,0,0.18)", transition: "box-shadow 180ms ease", "&:hover": { boxShadow: "0 20px 46px rgba(0,0,0,0.25)" } }}>
+      <Box sx={{ px: { xs: 2, sm: 2.6 }, py: 2.1, background: "linear-gradient(120deg, rgba(155,239,74,.065), rgba(76,141,255,.075))", borderBottom: "1px solid", borderColor: "divider" }}>
         <Stack direction={{ xs: "column", lg: "row" }} spacing={1.5} sx={{ justifyContent: "space-between", alignItems: { lg: "center" } }}>
-          <Box><Typography variant="h6" sx={{ color: "#173946", fontWeight: 880 }}>{title}</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: 0.35 }}>{description}</Typography></Box>
+          <Box><Typography variant="h6" sx={{ color: "text.primary", fontWeight: 880 }}>{title}</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: 0.35 }}>{description}</Typography></Box>
           <Stack direction="row" useFlexGap spacing={0.8} sx={{ flexWrap: "wrap" }}>{series.map((item) => { const shown = visibleSeries.has(item.id); return <Button key={item.id} size="small" variant={shown ? "contained" : "outlined"} aria-pressed={shown} onClick={() => toggleSeries(item.id)} sx={{ borderRadius: 99, bgcolor: shown ? item.color : undefined, borderColor: item.color, color: shown ? "#fff" : item.color, "&:hover": { bgcolor: shown ? item.color : `${item.color}12`, borderColor: item.color } }}><Box component="span" sx={{ width: 8, height: 8, mr: 0.7, borderRadius: "50%", bgcolor: shown ? "#fff" : item.color }} />{item.label}</Button>; })}</Stack>
         </Stack>
       </Box>
       <Box sx={{ p: { xs: 1.4, sm: 2.2 } }}>
-        {selectedPoint && <Paper elevation={0} aria-live="polite" sx={{ mb: 1.3, p: 1.35, borderRadius: "15px", bgcolor: "#f8fafc", border: "1px solid #e5edf1" }}><Stack direction="row" useFlexGap spacing={1.4} sx={{ alignItems: "center", flexWrap: "wrap" }}><Chip size="small" label={timeLabel(selectedPoint.timestamp)} sx={{ fontWeight: 850, bgcolor: "#dff8f2", color: "#0f766e" }} />{visible.map((item) => <Typography key={item.id} variant="caption" sx={{ color: "#405763" }}><Box component="span" sx={{ display: "inline-block", width: 8, height: 8, mr: 0.55, borderRadius: "50%", bgcolor: item.color }} /><strong>{item.label}:</strong> {numberFormatter.format(item.value(selectedPoint))} {unit}</Typography>)}</Stack></Paper>}
+        {selectedPoint && <Paper elevation={0} aria-live="polite" sx={{ mb: 1.3, p: 1.35, borderRadius: "15px", bgcolor: "rgba(255,255,255,.025)", border: "1px solid", borderColor: "divider" }}><Stack direction="row" useFlexGap spacing={1.4} sx={{ alignItems: "center", flexWrap: "wrap" }}><Chip size="small" label={timeLabel(selectedPoint.timestamp)} sx={{ fontWeight: 850, bgcolor: "rgba(155,239,74,.12)", color: "primary.main" }} />{visible.map((item) => <Typography key={item.id} variant="caption" color="text.secondary"><Box component="span" sx={{ display: "inline-block", width: 8, height: 8, mr: 0.55, borderRadius: "50%", bgcolor: item.color }} /><strong>{item.label}:</strong> {numberFormatter.format(item.value(selectedPoint))} {unit}</Typography>)}</Stack></Paper>}
         <Box tabIndex={0} role="application" aria-label={`${title}. Use left and right arrow keys to inspect 15-minute values.`} onKeyDown={moveSelection} sx={{ overflowX: "auto", borderRadius: 2, outline: "none", "&:focus-visible": { boxShadow: "0 0 0 3px rgba(13,148,136,0.2)" } }}>
           <Box component="svg" viewBox={`0 0 ${width} ${height}`} onMouseMove={selectFromPointer} sx={{ display: "block", width: "100%", minWidth: 580, height: "auto", cursor: "crosshair" }}>
-            {[0, 0.25, 0.5, 0.75, 1].map((ratio) => { const value = maximum - ratio * (maximum - minimum); const position = margins.top + ratio * (height - margins.top - margins.bottom); return <g key={ratio}><line x1={margins.left} x2={width - margins.right} y1={position} y2={position} stroke="#e2e8f0" strokeDasharray="5 6" /><text x={margins.left - 9} y={position + 4} textAnchor="end" fill="#64748b" fontSize="12">{numberFormatter.format(value)}</text></g>; })}
+            {[0, 0.25, 0.5, 0.75, 1].map((ratio) => { const value = maximum - ratio * (maximum - minimum); const position = margins.top + ratio * (height - margins.top - margins.bottom); return <g key={ratio}><line x1={margins.left} x2={width - margins.right} y1={position} y2={position} stroke="rgba(148,166,186,.18)" strokeDasharray="5 6" /><text x={margins.left - 9} y={position + 4} textAnchor="end" fill="#94A6BA" fontSize="12">{numberFormatter.format(value)}</text></g>; })}
             {referenceLines.map((line) => <g key={line.label}><line x1={margins.left} x2={width - margins.right} y1={y(line.value)} y2={y(line.value)} stroke={line.color} strokeWidth="1.8" strokeDasharray="9 5" /><text x={width - margins.right - 4} y={y(line.value) - 6} textAnchor="end" fill={line.color} fontSize="12" fontWeight="700">{line.label}</text></g>)}
             {signed && minimum < 0 && maximum > 0 && <line x1={margins.left} x2={width - margins.right} y1={y(0)} y2={y(0)} stroke="#475569" strokeWidth="2" />}
             {visible.map((item) => <path key={item.id} d={stepPath(points.map(item.value), x, y)} fill="none" stroke={item.color} strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" />)}
             {highlightLimits && points.map((point, index) => { const atLimit = referenceLines.some((line) => Math.abs(point.soc_pct - line.value) <= 0.05); return atLimit ? <circle key={`${point.timestamp}-limit`} cx={x(index)} cy={y(point.soc_pct)} r="5" fill="#f59e0b" stroke="#fff" strokeWidth="2"><title>{`${timeLabel(point.timestamp)}: SOC limit reached`}</title></circle> : null; })}
             {selectedPoint && <line x1={x(activeIndex)} x2={x(activeIndex)} y1={margins.top} y2={height - margins.bottom} stroke="#0f766e" strokeWidth="1.5" strokeDasharray="4 4" />}
-            {[0, 24, 48, 72, 95].map((index) => points[index] ? <text key={index} x={x(index)} y={height - 17} textAnchor={index === 0 ? "start" : index === 95 ? "end" : "middle"} fill="#64748b" fontSize="12">{timeLabel(points[index].timestamp)}</text> : null)}
-            <text x="16" y={height / 2} transform={`rotate(-90 16 ${height / 2})`} textAnchor="middle" fill="#64748b" fontSize="12">{unit}</text>
+            {[0, 24, 48, 72, 95].map((index) => points[index] ? <text key={index} x={x(index)} y={height - 17} textAnchor={index === 0 ? "start" : index === 95 ? "end" : "middle"} fill="#94A6BA" fontSize="12">{timeLabel(points[index].timestamp)}</text> : null)}
+            <text x="16" y={height / 2} transform={`rotate(-90 16 ${height / 2})`} textAnchor="middle" fill="#94A6BA" fontSize="12">{unit}</text>
           </Box>
         </Box>
       </Box>
@@ -164,7 +164,7 @@ function SummaryCards({ profile }: { profile: SingleOptimizationOperationalProfi
     ["Minimum SOC", `${numberFormatter.format(summary.minimum_soc_pct)}%`, BatteryChargingFullRoundedIcon, "#b45309"],
     ["Maximum SOC", `${numberFormatter.format(summary.maximum_soc_pct)}%`, BatteryChargingFullRoundedIcon, "#0f766e"],
   ] as const;
-  return <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0,1fr))", lg: "repeat(4, minmax(0,1fr))" }, gap: 1.2 }}>{cards.map(([label, value, Icon, color]) => <Paper key={label} elevation={0} sx={{ p: 1.65, borderRadius: "17px", border: "1px solid #e1e9ed", background: "linear-gradient(145deg, #fff, #f8fbfc)" }}><Stack direction="row" spacing={1.1} sx={{ alignItems: "center" }}><Box sx={{ width: 38, height: 38, display: "grid", placeItems: "center", flexShrink: 0, borderRadius: "12px", color, bgcolor: `${color}12` }}><Icon fontSize="small" /></Box><Box><Typography variant="caption" color="text.secondary">{label}</Typography><Typography variant="subtitle2" sx={{ mt: 0.2, fontWeight: 880 }}>{value}</Typography></Box></Stack></Paper>)}</Box>;
+  return <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0,1fr))", lg: "repeat(4, minmax(0,1fr))" }, gap: 1.2 }}>{cards.map(([label, value, Icon, color]) => <Paper key={label} elevation={0} sx={{ p: 1.65, borderRadius: "17px", border: "1px solid", borderColor: "divider", bgcolor: "rgba(255,255,255,.025)" }}><Stack direction="row" spacing={1.1} sx={{ alignItems: "center" }}><Box sx={{ width: 38, height: 38, display: "grid", placeItems: "center", flexShrink: 0, borderRadius: "12px", color, bgcolor: `${color}18` }}><Icon fontSize="small" /></Box><Box><Typography variant="caption" color="text.secondary">{label}</Typography><Typography variant="subtitle2" sx={{ mt: 0.2, color: "text.primary", fontWeight: 880 }}>{value}</Typography></Box></Stack></Paper>)}</Box>;
 }
 
 function errorMessage(payload: unknown, status: number) {
@@ -176,7 +176,7 @@ function errorMessage(payload: unknown, status: number) {
   return `The profile request failed with HTTP ${status}.`;
 }
 
-export default function OperationalProfiles({ jobId, dataset, result, selectedDate: initialDate, onDateChange }: { jobId: string | null; dataset: WorkspaceDatasetSummary | null; result: SingleOptimizationFinalResult; selectedDate: string | null; onDateChange: (date: string | null) => void; }) {
+export default function OperationalProfiles({ projectId, jobId, dataset, result, selectedDate: initialDate, onDateChange }: { projectId: string; jobId: string | null; dataset: WorkspaceDatasetSummary | null; result: SingleOptimizationFinalResult; selectedDate: string | null; onDateChange: (date: string | null) => void; }) {
   const [selectedDate, setSelectedDate] = useState(initialDate ?? dataset?.startDate ?? "");
   const [profile, setProfile] = useState<SingleOptimizationOperationalProfile | null>(null);
   const [loading, setLoading] = useState(false);
@@ -196,7 +196,7 @@ export default function OperationalProfiles({ jobId, dataset, result, selectedDa
     const controller = new AbortController();
     setLoading(true);
     setError(null);
-    fetch(`/api/single-optimization/jobs/${encodeURIComponent(jobId)}/profiles?date=${encodeURIComponent(selectedDate)}`, { signal: controller.signal })
+    fetch(`/api/projects/${encodeURIComponent(projectId)}/single-optimization/jobs/${encodeURIComponent(jobId)}/profiles?date=${encodeURIComponent(selectedDate)}`, { credentials: "include", signal: controller.signal })
       .then(async (response) => {
         const payload: unknown = await response.json().catch(() => null);
         if (!response.ok) throw new Error(errorMessage(payload, response.status));
@@ -216,25 +216,25 @@ export default function OperationalProfiles({ jobId, dataset, result, selectedDa
   }, [dataset, jobId, requestVersion, selectedDate]);
 
   const systemSeries = useMemo<SeriesDefinition[]>(() => [
-    { id: "pv", label: "PV generation", color: "#0d9488", value: (point) => point.pv_kw },
-    { id: "ev", label: "EV demand", color: "#2563eb", value: (point) => point.ev_kw },
-    { id: "grid", label: "Grid import", color: "#7c3aed", value: (point) => point.grid_import_kw },
-    { id: "export", label: "PV export", color: "#f59e0b", value: (point) => point.pv_export_kw },
+    { id: "pv", label: "PV generation", color: "#9BEF4A", value: (point) => point.pv_kw },
+    { id: "ev", label: "EV demand", color: "#4C8DFF", value: (point) => point.ev_kw },
+    { id: "grid", label: "Grid import", color: "#C084FC", value: (point) => point.grid_import_kw },
+    { id: "export", label: "PV export", color: "#F5A742", value: (point) => point.pv_export_kw },
   ], []);
   const bessSeries = useMemo<SeriesDefinition[]>(() => [
-    { id: "charge", label: "Charging", color: "#dc2626", value: (point) => -point.bess_charge_kw },
-    { id: "discharge", label: "Discharging", color: "#16a34a", value: (point) => point.bess_discharge_kw },
+    { id: "charge", label: "Charging", color: "#F06464", value: (point) => -point.bess_charge_kw },
+    { id: "discharge", label: "Discharging", color: "#9BEF4A", value: (point) => point.bess_discharge_kw },
   ], []);
   const socSeries = useMemo<SeriesDefinition[]>(() => [
-    { id: "soc", label: "State of charge", color: "#0d9488", value: (point) => point.soc_pct },
+    { id: "soc", label: "State of charge", color: "#4C8DFF", value: (point) => point.soc_pct },
   ], []);
 
   if (!jobId || !dataset) return <Alert severity="info" sx={{ borderRadius: "17px" }}>Operational profiles need a completed job and its uploaded dataset.</Alert>;
 
   return (
-    <Paper component="section" aria-labelledby="operational-profiles-title" elevation={0} sx={{ mt: 0.5, overflow: "hidden", borderRadius: "28px", border: "1px solid #cde4e2", boxShadow: "0 22px 55px rgba(15,65,77,0.08)" }}>
+    <Paper component="section" aria-labelledby="operational-profiles-title" elevation={0} sx={{ mt: 0.5, overflow: "hidden", borderRadius: "28px", border: "1px solid", borderColor: "divider", bgcolor: "#0D1D2D", boxShadow: "0 22px 55px rgba(0,0,0,0.22)" }}>
       <Box sx={{ p: { xs: 2.3, sm: 3 }, color: "#fff", background: "linear-gradient(115deg, #0b4f59, #0f766e 56%, #2563eb 130%)" }}>
-        <Stack direction={{ xs: "column", md: "row" }} spacing={2} sx={{ justifyContent: "space-between", alignItems: { md: "center" } }}><Box><Stack direction="row" spacing={1} sx={{ alignItems: "center" }}><WaterfallChartRoundedIcon /><Typography variant="overline" sx={{ color: "#a7f3d0", fontWeight: 850, letterSpacing: "0.1em" }}>SIMULATED OPERATIONS</Typography></Stack><Typography id="operational-profiles-title" variant="h4" sx={{ mt: 0.5, fontWeight: 900 }}>Operational Profiles</Typography><Typography sx={{ mt: 0.7, color: "rgba(255,255,255,0.79)" }}>Explore the winning {result.battery_name} dispatch at 15-minute resolution without changing the saved optimization result.</Typography></Box><Chip label={`${numberFormatter.format(result.best_bess_capacity_kwh)} kWh · ${numberFormatter.format(result.best_peak_support_pct)}% peak support`} sx={{ color: "#fff", bgcolor: "rgba(255,255,255,0.14)", fontWeight: 820 }} /></Stack>
+        <Stack direction={{ xs: "column", md: "row" }} spacing={2} sx={{ justifyContent: "space-between", alignItems: { md: "center" } }}><Box><Stack direction="row" spacing={1} sx={{ alignItems: "center" }}><WaterfallChartRoundedIcon /><Typography variant="overline" sx={{ color: "#a7f3d0", fontWeight: 850, letterSpacing: "0.1em" }}>SIMULATED OPERATIONS</Typography></Stack><Typography id="operational-profiles-title" variant="h4" sx={{ mt: 0.5, fontWeight: 900 }}>Operational Profiles</Typography><Typography sx={{ mt: 0.7, color: "rgba(255,255,255,0.79)" }}>Winning {result.battery_name} dispatch at 15-minute resolution.</Typography></Box><Chip label={`${numberFormatter.format(result.best_bess_capacity_kwh)} kWh · ${numberFormatter.format(result.best_peak_support_pct)}% peak support`} sx={{ color: "#fff", bgcolor: "rgba(255,255,255,0.14)", fontWeight: 820 }} /></Stack>
       </Box>
       <Box sx={{ p: { xs: 2.1, sm: 2.8 } }}>
         <Stack direction={{ xs: "column", sm: "row" }} spacing={1.4} sx={{ justifyContent: "space-between", alignItems: { sm: "center" } }}><Box><Typography variant="h6" sx={{ fontWeight: 870 }}>Select an operating day</Typography><Typography variant="body2" color="text.secondary">Available from {dataset.startDate} through {dataset.endDate}.</Typography></Box><TextField type="date" label="Profile date" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: dataset.startDate, max: dataset.endDate } }} sx={{ minWidth: { sm: 220 }, "& .MuiOutlinedInput-root": { borderRadius: "13px" } }} /></Stack>
@@ -243,7 +243,7 @@ export default function OperationalProfiles({ jobId, dataset, result, selectedDa
         {loading && profile && <Alert icon={<CircularProgress size={18} />} severity="info" sx={{ mt: 2, borderRadius: "15px" }}>Loading {selectedDate} while keeping the previous profile visible…</Alert>}
         {error && <Alert severity="error" icon={error.code === "BACKEND_UNAVAILABLE" ? <CloudOffRoundedIcon /> : undefined} action={<Button color="inherit" size="small" startIcon={<RefreshRoundedIcon />} onClick={() => setRequestVersion((current) => current + 1)}>Retry</Button>} sx={{ mt: 2, borderRadius: "16px" }}><Typography variant="subtitle2" sx={{ fontWeight: 850 }}>{error.code}</Typography><Typography variant="body2">{error.message}</Typography></Alert>}
 
-        {profile && <Stack spacing={2.2} sx={{ mt: 2.3, opacity: loading ? 0.62 : 1, transition: "opacity 180ms ease" }}><Stack direction="row" spacing={1} sx={{ alignItems: "center" }}><CalendarMonthRoundedIcon sx={{ color: "#0f766e" }} /><Typography variant="subtitle1" sx={{ fontWeight: 850 }}>Daily summary · {profile.date}</Typography><Chip size="small" label="96 intervals" sx={{ ml: "auto", fontWeight: 780 }} /></Stack><SummaryCards profile={profile} /><InteractiveStepChart title="System Power Profile" description="PV, EV, grid import, and export on one shared kW axis." points={profile.points} series={systemSeries} unit="kW" /><InteractiveStepChart title="BESS Charge and Discharge" description="Charging is plotted below zero; discharging is plotted above zero." points={profile.points} series={bessSeries} unit="kW" signed /><InteractiveStepChart title="Battery State of Charge" description="SOC trajectory with the verified reference minimum and maximum limits." points={profile.points} series={socSeries} unit="%" fixedDomain={[0, 100]} referenceLines={[{ label: `Minimum ${numberFormatter.format(profile.soc_min_limit_pct)}%`, value: profile.soc_min_limit_pct, color: "#dc2626" }, { label: `Maximum ${numberFormatter.format(profile.soc_max_limit_pct)}%`, value: profile.soc_max_limit_pct, color: "#f59e0b" }]} highlightLimits /></Stack>}
+        {profile && <Stack spacing={2.2} sx={{ mt: 2.3, opacity: loading ? 0.62 : 1, transition: "opacity 180ms ease" }}><Stack direction="row" spacing={1} sx={{ alignItems: "center" }}><CalendarMonthRoundedIcon sx={{ color: "primary.main" }} /><Typography variant="subtitle1" sx={{ fontWeight: 850 }}>Daily summary · {profile.date}</Typography><Chip size="small" label="96 intervals" sx={{ ml: "auto", fontWeight: 780 }} /></Stack><SummaryCards profile={profile} /><InteractiveStepChart title="System Power Profile" description="PV, EV, grid import, and export on one shared kW axis." points={profile.points} series={systemSeries} unit="kW" /><InteractiveStepChart title="BESS Charge and Discharge" description="Charging is plotted below zero; discharging is plotted above zero." points={profile.points} series={bessSeries} unit="kW" signed /><InteractiveStepChart title="Battery State of Charge" description="SOC trajectory with the verified reference minimum and maximum limits." points={profile.points} series={socSeries} unit="%" fixedDomain={[0, 100]} referenceLines={[{ label: `Minimum ${numberFormatter.format(profile.soc_min_limit_pct)}%`, value: profile.soc_min_limit_pct, color: "#F06464" }, { label: `Maximum ${numberFormatter.format(profile.soc_max_limit_pct)}%`, value: profile.soc_max_limit_pct, color: "#F5A742" }]} highlightLimits /></Stack>}
       </Box>
     </Paper>
   );

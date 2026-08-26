@@ -3,8 +3,8 @@ from collections.abc import Sequence
 from typing import TypedDict
 
 
-AHP_MATRIX_SIZE = 6
-AHP_RANDOM_INDEX = 1.24
+AHP_MATRIX_SIZE = 5
+AHP_RANDOM_INDEX = 1.12
 AHP_MAX_ACCEPTABLE_CR = 0.10
 AHP_ABSOLUTE_TOLERANCE = 1e-8
 AHP_RELATIVE_TOLERANCE = 1e-5

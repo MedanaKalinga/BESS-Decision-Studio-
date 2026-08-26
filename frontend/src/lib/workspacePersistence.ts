@@ -14,6 +14,7 @@ import {
   sanitizeComparisonConfiguration,
   sanitizeComparisonRunState,
 } from "./comparisonOptimization.ts";
+import { DATASET_EXPIRED_MESSAGE, sanitizeWorkspaceDataset } from "./datasetWorkspace.ts";
 
 const WORKSPACE_STORAGE_KEY = "bess-studio-workspace-v1";
 
@@ -32,27 +33,37 @@ export function getWorkspaceStorageKey(): string {
   return WORKSPACE_STORAGE_KEY;
 }
 
+export function getProjectWorkspaceStorageKey(projectId: string): string {
+  return `${WORKSPACE_STORAGE_KEY}:project:${projectId}`;
+}
+
 export function readPersistedWorkspaceState(
   storage: Storage | null,
+  storageKey = WORKSPACE_STORAGE_KEY,
 ): PersistedWorkspaceState | null {
   if (!storage) {
     return null;
   }
 
   try {
-    const rawValue = storage.getItem(WORKSPACE_STORAGE_KEY);
+    const rawValue = storage.getItem(storageKey);
     if (!rawValue) {
       return null;
     }
 
     const value = JSON.parse(rawValue) as Partial<PersistedWorkspaceState>;
     if (!value || value.version !== 1 || typeof value !== "object") {
-      storage.removeItem(WORKSPACE_STORAGE_KEY);
+      storage.removeItem(storageKey);
       return null;
     }
 
     return {
       ...value,
+      dataset: sanitizeWorkspaceDataset(value.dataset),
+      datasetExplorerDate:
+        typeof value.datasetExplorerDate === "string"
+          ? value.datasetExplorerDate
+          : value.dataset?.startDate ?? null,
       comparisonAhp: sanitizeComparisonAHPState(value.comparisonAhp),
       comparisonConfiguration: sanitizeComparisonConfiguration(value.comparisonConfiguration),
       comparisonRunState: sanitizeComparisonRunState(value.comparisonRunState),
@@ -62,7 +73,7 @@ export function readPersistedWorkspaceState(
       promethee: sanitizePrometheeWorkspaceState(value.promethee),
     } as PersistedWorkspaceState;
   } catch {
-    storage.removeItem(WORKSPACE_STORAGE_KEY);
+    storage.removeItem(storageKey);
     return null;
   }
 }
@@ -70,20 +81,24 @@ export function readPersistedWorkspaceState(
 export function writePersistedWorkspaceState(
   storage: Storage | null,
   state: PersistedWorkspaceState,
+  storageKey = WORKSPACE_STORAGE_KEY,
 ): void {
   if (!storage) {
     return;
   }
 
-  storage.setItem(WORKSPACE_STORAGE_KEY, JSON.stringify(state));
+  storage.setItem(
+    storageKey,
+    JSON.stringify({ ...state, dataset: sanitizeWorkspaceDataset(state.dataset) }),
+  );
 }
 
-export function clearPersistedWorkspaceState(storage: Storage | null): void {
+export function clearPersistedWorkspaceState(storage: Storage | null, storageKey = WORKSPACE_STORAGE_KEY): void {
   if (!storage) {
     return;
   }
 
-  storage.removeItem(WORKSPACE_STORAGE_KEY);
+  storage.removeItem(storageKey);
 }
 
 export function buildPersistedWorkspaceState(
@@ -91,6 +106,7 @@ export function buildPersistedWorkspaceState(
 ): PersistedWorkspaceState {
   return {
     ...state,
+    dataset: sanitizeWorkspaceDataset(state.dataset),
     version: 1,
   };
 }
@@ -110,14 +126,19 @@ export async function validatePersistedWorkspaceState(
     );
     if (!datasetExists) {
       return {
-        state: null,
-        error:
-          "Dataset session is no longer available. Please upload the CSV again.",
+        state: {
+          ...state,
+          dataset: { ...state.dataset, status: "expired" },
+        },
+        error: DATASET_EXPIRED_MESSAGE,
       };
     }
   }
 
-  if (state.runState.jobId) {
+  if (
+    state.runState.jobId
+    && ["queued", "running", "cancelling", "submitting"].includes(state.runState.phase)
+  ) {
     const jobExists = await validators.jobExists(state.runState.jobId);
     if (!jobExists) {
       const expiredRunState: SingleOptimizationRunWorkspaceState = {
